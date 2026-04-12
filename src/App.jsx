@@ -1392,15 +1392,19 @@ function ScriptPage({ contacts, scriptType }) {
           border: `1px solid ${COLORS.border}`,
         }}
       >
-              {script.sections.map((section, sectionIdx) => (
-          <div key={sectionIdx} style={{ marginBottom: '20px' }}>
-            <h3 style={{ color: section.color, fontWeight: '600', marginBottom: '12px' }}>
+                {script.sections.map((section, sectionIdx) => (
+          <div key={sectionIdx} style={{ marginBottom: '28px' }}>
+            <h3 style={{
+              color: section.color,
+              fontWeight: '700',
+              marginBottom: '12px',
+              fontSize: '17px'
+            }}>
               {section.name}
             </h3>
             {section.questions.map((question, qIdx) => {
               const key = `${scriptType}-${sectionIdx}-${qIdx}`;
               const isChecked = checkedQs[key];
-
               return (
                 <label
                   key={qIdx}
@@ -1410,14 +1414,15 @@ function ScriptPage({ contacts, scriptType }) {
                     gap: '10px',
                     cursor: 'pointer',
                     color: COLORS.text,
-                    fontSize: '14px',
-                    lineHeight: '1.5',
+                    fontSize: '15px',
+                    lineHeight: '1.6',
                     marginBottom: '12px',
-                    padding: '8px',
+                    padding: '10px',
                     backgroundColor: isChecked ? COLORS.bg : 'transparent',
                     borderRadius: '4px',
                     textDecoration: isChecked ? 'line-through' : 'none',
                     opacity: isChecked ? 0.6 : 1,
+                    border: `1px solid ${COLORS.border}`
                   }}
                 >
                   <input
@@ -1425,14 +1430,14 @@ function ScriptPage({ contacts, scriptType }) {
                     checked={isChecked}
                     onChange={() => toggleCheck(key)}
                     style={{
-                      marginTop: '3px',
+                      marginTop: '4px',
                       cursor: 'pointer',
                       accentColor: COLORS.accent,
                     }}
                   />
                   <div>
-                    <div>{question.q}</div>
-                    <div style={{ fontSize: '12px', color: COLORS.textDim, marginTop: '4px' }}>
+                    <div style={{ fontWeight: 500 }}>{question.q}</div>
+                    <div style={{ fontSize: '13px', color: COLORS.textDim, marginTop: '4px' }}>
                       {question.why}
                     </div>
                   </div>

@@ -1392,38 +1392,18 @@ function ScriptPage({ contacts, scriptType }) {
           border: `1px solid ${COLORS.border}`,
         }}
       >
-        {script.split('\n').map((line, idx) => {
-          const key = `${scriptType}-${idx}`;
-          const isChecked = checkedQs[key];
+              {script.sections.map((section, sectionIdx) => (
+          <div key={sectionIdx} style={{ marginBottom: '20px' }}>
+            <h3 style={{ color: section.color, fontWeight: '600', marginBottom: '12px' }}>
+              {section.name}
+            </h3>
+            {section.questions.map((question, qIdx) => {
+              const key = `${scriptType}-${sectionIdx}-${qIdx}`;
+              const isChecked = checkedQs[key];
 
-          if (!line.trim()) return null;
-
-          const isSection = /^\d+\./.test(line);
-
-          return (
-            <div
-              key={idx}
-              style={{
-                marginBottom: '12px',
-                padding: '8px',
-                backgroundColor: isSection ? COLORS.bg : 'transparent',
-                borderRadius: '4px',
-                textDecoration: isChecked ? 'line-through' : 'none',
-                opacity: isChecked ? 0.6 : 1,
-              }}
-            >
-              {isSection ? (
-                <div
-                  style={{
-                    color: COLORS.accent,
-                    fontWeight: '600',
-                    marginBottom: '8px',
-                  }}
-                >
-                  {line}
-                </div>
-              ) : (
+              return (
                 <label
+                  key={qIdx}
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
@@ -1432,6 +1412,12 @@ function ScriptPage({ contacts, scriptType }) {
                     color: COLORS.text,
                     fontSize: '14px',
                     lineHeight: '1.5',
+                    marginBottom: '12px',
+                    padding: '8px',
+                    backgroundColor: isChecked ? COLORS.bg : 'transparent',
+                    borderRadius: '4px',
+                    textDecoration: isChecked ? 'line-through' : 'none',
+                    opacity: isChecked ? 0.6 : 1,
                   }}
                 >
                   <input
@@ -1444,12 +1430,17 @@ function ScriptPage({ contacts, scriptType }) {
                       accentColor: COLORS.accent,
                     }}
                   />
-                  <span>{line.trim()}</span>
+                  <div>
+                    <div>{question.q}</div>
+                    <div style={{ fontSize: '12px', color: COLORS.textDim, marginTop: '4px' }}>
+                      {question.why}
+                    </div>
+                  </div>
                 </label>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );

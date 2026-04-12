@@ -17,6 +17,8 @@ const COLORS = {
   goldLight: "#FBF6E8",
   text: "#1C1917",
   textMuted: "#78716C",
+  textDim: "#78716C",
+  sidebar: "#FDFCF9",
   border: "#E7E5E0",
   borderDark: "#D6D3CD",
   success: "#16A34A",

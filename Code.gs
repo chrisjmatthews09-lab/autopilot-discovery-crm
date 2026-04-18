@@ -9,10 +9,13 @@
 // SHEET NAMES
 // ============================================================================
 const SHEET_NAMES = {
-  CONTACTS: 'Contacts',
+  CONTACTS: 'Contacts', // legacy, kept for backward-compat
   ANALYSES: 'Analyses',
   SYNTHESIS: 'Synthesis',
   SETTINGS: 'Settings',
+  PRACTITIONERS: 'Practitioners',
+  BUSINESSES: 'Businesses',
+  TRANSCRIPTS: 'Transcripts',
 };
 
 const SHEET_HEADERS = {
@@ -20,6 +23,31 @@ const SHEET_HEADERS = {
   Analyses: ['id', 'contactId', 'intervieweeName', 'type', 'analyzedAt', 'overallSentiment', 'leadScore', 'fullJSON'],
   Synthesis: ['id', 'createdAt', 'fullJSON'],
   Settings: ['key', 'value'],
+  Practitioners: [
+    'id', 'name', 'firmName', 'role', 'phone', 'email',
+    'firmType', 'firmSize', 'clientCount', 'revenueEstimate', 'yearsInBusiness',
+    'location', 'specialties', 'techStack',
+    'painPoints', 'acquisitionSignals', 'aiSentiment',
+    'status', 'interviewDate',
+    'transcriptUrl', 'summaryUrl', 'enrichedAt',
+    'source', 'notes', 'createdAt', 'updatedAt',
+  ],
+  Businesses: [
+    'id', 'name', 'company', 'role', 'phone', 'email',
+    'industry', 'revenue', 'revenueMidpoint', 'employees', 'yearsInBusiness',
+    'location', 'currentAccounting', 'monthsBehind', 'currentSpend',
+    'painPoints', 'wtpSignals', 'leadScore', 'quotableLines',
+    'status', 'interviewDate',
+    'transcriptUrl', 'summaryUrl', 'enrichedAt',
+    'source', 'notes', 'createdAt', 'updatedAt',
+  ],
+  Transcripts: [
+    'id', 'intervieweeName', 'interviewDate',
+    'transcriptUrl', 'summaryUrl',
+    'linkedType', 'linkedContactId',
+    'status', 'extractedData',
+    'createdAt', 'processedAt',
+  ],
 };
 
 // ============================================================================
@@ -36,7 +64,9 @@ function doGet(e) {
     switch (action) {
       case 'getData':
         return serveJSON({
-          contacts: readSheet(SHEET_NAMES.CONTACTS),
+          practitioners: readSheet(SHEET_NAMES.PRACTITIONERS),
+          businesses: readSheet(SHEET_NAMES.BUSINESSES),
+          transcripts: readSheet(SHEET_NAMES.TRANSCRIPTS),
           analyses: readSheet(SHEET_NAMES.ANALYSES),
           synthesis: readSheet(SHEET_NAMES.SYNTHESIS),
         });
@@ -74,6 +104,43 @@ function doPost(e) {
 
       case 'deleteContact':
         return handleDeleteContact(payload.id);
+
+      // V2 schema handlers ---------------------------------------------------
+      case 'upsertPractitioner':
+        return handleUpsertRow(SHEET_NAMES.PRACTITIONERS, payload.data);
+
+      case 'deletePractitioner':
+        return handleDeleteRow(SHEET_NAMES.PRACTITIONERS, payload.id);
+
+      case 'upsertBusiness':
+        return handleUpsertRow(SHEET_NAMES.BUSINESSES, payload.data);
+
+      case 'deleteBusiness':
+        return handleDeleteRow(SHEET_NAMES.BUSINESSES, payload.id);
+
+      case 'ingestTranscript':
+        return handleIngestTranscript(payload.data);
+
+      case 'upsertTranscript':
+        return handleUpsertRow(SHEET_NAMES.TRANSCRIPTS, payload.data);
+
+      case 'deleteTranscript':
+        return handleDeleteRow(SHEET_NAMES.TRANSCRIPTS, payload.id);
+
+      case 'linkTranscript':
+        return handleLinkTranscript(
+          payload.transcriptId,
+          payload.linkedType,
+          payload.linkedContactId
+        );
+
+      case 'enrichContact':
+        return handleEnrichContact(
+          payload.contactType,
+          payload.contactId,
+          payload.transcriptId
+        );
+      // ----------------------------------------------------------------------
 
       case 'saveAnalysis':
         return handleSaveAnalysis(payload.data);
@@ -458,6 +525,346 @@ const SYNTHESIS_SYSTEM_PROMPT = `You are synthesizing multiple interview analyse
   "risksIdentified": ["risk1", "risk2"],
   "nextSteps": ["step1", "step2"]
 }`;
+
+// ============================================================================
+// V2 GENERIC ROW HANDLERS (Practitioners / Businesses / Transcripts)
+// ============================================================================
+
+/**
+ * Upsert a row in any V2 sheet by id. Creates if new, merges if existing.
+ */
+function handleUpsertRow(sheetName, data) {
+  const headers = SHEET_HEADERS[sheetName];
+  if (!headers) return serveJSON({ error: 'Unknown sheet: ' + sheetName });
+  if (!data || !data.id) return serveJSON({ error: 'Missing row id' });
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return serveJSON({ error: 'Sheet not found: ' + sheetName });
+
+  const values = sheet.getDataRange().getValues();
+  const now = new Date().toISOString();
+
+  // Find existing row by id
+  let rowIndex = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][0] === data.id) {
+      rowIndex = i;
+      break;
+    }
+  }
+
+  // Normalize: serialize any object/array values to JSON strings
+  const normalized = {};
+  Object.keys(data).forEach((k) => {
+    const v = data[k];
+    normalized[k] =
+      v !== null && typeof v === 'object' ? JSON.stringify(v) : v;
+  });
+
+  if (rowIndex >= 0) {
+    // UPDATE — merge with existing row
+    const existing = {};
+    headers.forEach((h, i) => { existing[h] = values[rowIndex][i]; });
+    const merged = Object.assign({}, existing, normalized, { updatedAt: now });
+    const rowValues = headers.map((h) => {
+      const v = merged[h];
+      return v === undefined || v === null ? '' : v;
+    });
+    sheet.getRange(rowIndex + 1, 1, 1, headers.length).setValues([rowValues]);
+    return serveJSON({ success: true, row: merged });
+  } else {
+    // INSERT
+    const merged = Object.assign(
+      { createdAt: now, updatedAt: now },
+      normalized
+    );
+    const rowValues = headers.map((h) => {
+      const v = merged[h];
+      return v === undefined || v === null ? '' : v;
+    });
+    sheet.appendRow(rowValues);
+    return serveJSON({ success: true, row: merged });
+  }
+}
+
+/**
+ * Delete a row by id from any V2 sheet.
+ */
+function handleDeleteRow(sheetName, id) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return serveJSON({ error: 'Sheet not found: ' + sheetName });
+
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][0] === id) {
+      sheet.deleteRow(i + 1);
+      return serveJSON({ success: true });
+    }
+  }
+  return serveJSON({ error: 'Row not found: ' + id });
+}
+
+// ============================================================================
+// TRANSCRIPT INGESTION + LINKING + ENRICHMENT
+// ============================================================================
+
+/**
+ * Called by Zapier when a new Plaud transcript is ready.
+ * Expected payload.data:
+ *   { intervieweeName, interviewDate, transcriptUrl, summaryUrl }
+ */
+function handleIngestTranscript(data) {
+  const id = 'trans-' + new Date().getTime();
+  const row = {
+    id,
+    intervieweeName: data.intervieweeName || '',
+    interviewDate: data.interviewDate || new Date().toISOString(),
+    transcriptUrl: data.transcriptUrl || '',
+    summaryUrl: data.summaryUrl || '',
+    linkedType: '',
+    linkedContactId: '',
+    status: 'new',
+    extractedData: '',
+  };
+  return handleUpsertRow(SHEET_NAMES.TRANSCRIPTS, row);
+}
+
+/**
+ * Link a transcript to an existing Practitioner or Business.
+ */
+function handleLinkTranscript(transcriptId, linkedType, linkedContactId) {
+  if (!['practitioner', 'business'].includes(linkedType)) {
+    return serveJSON({ error: 'linkedType must be "practitioner" or "business"' });
+  }
+
+  // Update the transcript row
+  const updateTrans = handleUpsertRow(SHEET_NAMES.TRANSCRIPTS, {
+    id: transcriptId,
+    linkedType,
+    linkedContactId,
+    status: 'linked',
+  });
+
+  // Also copy the transcript/summary URLs onto the contact record
+  const trans = findRowById(SHEET_NAMES.TRANSCRIPTS, transcriptId);
+  if (trans) {
+    const targetSheet =
+      linkedType === 'practitioner'
+        ? SHEET_NAMES.PRACTITIONERS
+        : SHEET_NAMES.BUSINESSES;
+    handleUpsertRow(targetSheet, {
+      id: linkedContactId,
+      transcriptUrl: trans.transcriptUrl,
+      summaryUrl: trans.summaryUrl,
+      interviewDate: trans.interviewDate,
+    });
+  }
+
+  return updateTrans;
+}
+
+/**
+ * Read a transcript/summary from Google Drive, call Claude to extract
+ * structured fields, and update the linked contact row.
+ */
+function handleEnrichContact(contactType, contactId, transcriptId) {
+  const settings = readSettingsAsObject();
+  const apiKey = settings.anthropicApiKey;
+  if (!apiKey) return serveJSON({ error: 'Anthropic API key not set in Settings' });
+
+  const trans = findRowById(SHEET_NAMES.TRANSCRIPTS, transcriptId);
+  if (!trans) return serveJSON({ error: 'Transcript not found' });
+
+  // Prefer summary (short), fall back to transcript (long)
+  let sourceText = '';
+  try {
+    if (trans.summaryUrl) sourceText = readDriveFile(trans.summaryUrl);
+    if (!sourceText && trans.transcriptUrl) sourceText = readDriveFile(trans.transcriptUrl);
+  } catch (err) {
+    return serveJSON({ error: 'Could not read Drive file: ' + err.toString() });
+  }
+  if (!sourceText) return serveJSON({ error: 'No transcript or summary content found' });
+
+  // Pick prompt for the right object type
+  const systemPrompt =
+    contactType === 'practitioner'
+      ? PRACTITIONER_EXTRACTION_PROMPT
+      : BUSINESS_EXTRACTION_PROMPT;
+
+  const userMessage =
+    'Extract structured fields from this interview material. ' +
+    'Return ONLY valid JSON matching the schema in the system prompt.\n\n' +
+    'INTERVIEWEE: ' + (trans.intervieweeName || 'Unknown') + '\n\n' +
+    'MATERIAL:\n' + sourceText.slice(0, 30000); // hard cap to stay within token limits
+
+  let extracted;
+  try {
+    extracted = callAnthropicAPI(apiKey, systemPrompt, userMessage, 3000);
+  } catch (err) {
+    return serveJSON({ error: 'Claude API error: ' + err.toString() });
+  }
+
+  if (!extracted || typeof extracted !== 'object') {
+    return serveJSON({ error: 'Claude did not return structured JSON' });
+  }
+
+  // Compute revenue midpoint helper for Businesses
+  if (contactType === 'business' && extracted.revenue && !extracted.revenueMidpoint) {
+    extracted.revenueMidpoint = estimateRevenueMidpoint(extracted.revenue);
+  }
+
+  // Merge extracted fields into the contact row
+  const targetSheet =
+    contactType === 'practitioner'
+      ? SHEET_NAMES.PRACTITIONERS
+      : SHEET_NAMES.BUSINESSES;
+
+  const updatePayload = Object.assign({}, extracted, {
+    id: contactId,
+    enrichedAt: new Date().toISOString(),
+  });
+  const result = handleUpsertRow(targetSheet, updatePayload);
+
+  // Mark transcript enriched
+  handleUpsertRow(SHEET_NAMES.TRANSCRIPTS, {
+    id: transcriptId,
+    status: 'enriched',
+    extractedData: JSON.stringify(extracted),
+    processedAt: new Date().toISOString(),
+  });
+
+  return result;
+}
+
+/**
+ * Find a row by id in a given sheet, returned as a plain object.
+ */
+function findRowById(sheetName, id) {
+  const rows = readSheet(sheetName);
+  return rows.find((r) => r.id === id) || null;
+}
+
+/**
+ * Turn a Google Drive file URL into plain text we can feed to Claude.
+ * Works with:
+ *   - Google Docs (extracted as plain text)
+ *   - .txt / .md / .rtf files
+ *   - Any file with textual blob content
+ */
+function readDriveFile(url) {
+  const fileId = extractDriveFileId(url);
+  if (!fileId) throw new Error('Could not parse Drive file id from URL: ' + url);
+
+  const file = DriveApp.getFileById(fileId);
+  const mime = file.getMimeType();
+
+  if (mime === 'application/vnd.google-apps.document') {
+    return DocumentApp.openById(fileId).getBody().getText();
+  }
+
+  // For everything else, try to read as text blob
+  return file.getBlob().getDataAsString();
+}
+
+function extractDriveFileId(url) {
+  if (!url) return null;
+  // /d/<id>/ pattern (Docs, Sheets)
+  let m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  // ?id=<id> pattern
+  m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  // Bare id
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(url)) return url;
+  return null;
+}
+
+/**
+ * Parse a revenue range string into an approximate midpoint (for sorting/charts).
+ */
+function estimateRevenueMidpoint(revenueStr) {
+  if (!revenueStr || typeof revenueStr !== 'string') return 0;
+  const s = revenueStr.toLowerCase().replace(/[$,\s]/g, '');
+  const nums = [];
+  const re = /([\d.]+)(k|m|b)?/g;
+  let match;
+  while ((match = re.exec(s)) !== null) {
+    let n = parseFloat(match[1]);
+    const u = match[2];
+    if (u === 'k') n *= 1000;
+    else if (u === 'm') n *= 1000000;
+    else if (u === 'b') n *= 1000000000;
+    nums.push(n);
+  }
+  if (!nums.length) return 0;
+  if (nums.length === 1) return Math.round(nums[0]);
+  return Math.round((nums[0] + nums[1]) / 2);
+}
+
+// ============================================================================
+// V2 EXTRACTION PROMPTS
+// ============================================================================
+
+const PRACTITIONER_EXTRACTION_PROMPT = `You are extracting structured data from an interview with an accounting practitioner (bookkeeper, CPA, or firm owner) for Autopilot Accounting's market research and M&A roll-up thesis.
+
+Return ONLY valid JSON — no markdown, no preamble. Use this exact shape; leave fields as empty strings/arrays when the transcript does not say:
+
+{
+  "name": "interviewee full name",
+  "firmName": "their firm's name",
+  "role": "their role (Owner, Partner, Manager, etc.)",
+  "firmType": "one of: tax | bookkeeping | tax+bk | cas | cfo-advisory | full-service",
+  "firmSize": "one of: solo | 2-5 | 6-20 | 20+",
+  "clientCount": "approximate client count as a string (e.g., '150')",
+  "revenueEstimate": "firm annual revenue range (e.g., '$500K-$1M')",
+  "yearsInBusiness": "number as string",
+  "location": "city, state",
+  "specialties": ["vertical", "vertical"],
+  "techStack": ["QBO", "Karbon"],
+  "painPoints": ["pain 1", "pain 2", "pain 3"],
+  "acquisitionSignals": {
+    "openToSelling": "yes | no | maybe | unclear",
+    "valuationExpectation": "stated price or multiple if any",
+    "successorSituation": "succession planning notes"
+  },
+  "aiSentiment": "positive | neutral | negative",
+  "notes": "1-3 sentence summary of the most interesting takeaway"
+}
+
+If a field is not discussed, leave it as "" or []. Never invent facts.`;
+
+const BUSINESS_EXTRACTION_PROMPT = `You are extracting structured data from an interview with a small business owner for Autopilot Accounting's market research on outsourced accounting demand.
+
+Return ONLY valid JSON — no markdown, no preamble. Use this exact shape; leave fields empty when the transcript does not say:
+
+{
+  "name": "interviewee full name",
+  "company": "their business name",
+  "role": "their role (Owner, CEO, Founder, etc.)",
+  "industry": "specific industry (e.g., 'construction - painting')",
+  "revenue": "annual revenue as a range string (e.g., '$1M-$3M')",
+  "employees": "headcount as string",
+  "yearsInBusiness": "number as string",
+  "location": "city, state",
+  "currentAccounting": "who handles books today (e.g., 'spouse + QBO', 'external CPA')",
+  "monthsBehind": "how current their books are, in months (e.g., '3')",
+  "currentSpend": "what they pay today (e.g., '$2K/yr tax only')",
+  "painPoints": ["pain 1", "pain 2", "pain 3"],
+  "wtpSignals": {
+    "namedPrice": "any explicit price mentioned",
+    "ownerTimeDisplacement": "hours/week the owner or spouse spends on books",
+    "decisionMakingBlindness": "evidence they fly blind on numbers",
+    "compliancePressure": "SBA, bonding, banking triggers",
+    "priorBadExperience": "past bad bookkeeper/CPA story"
+  },
+  "leadScore": 7,
+  "quotableLines": ["memorable quote 1", "memorable quote 2"],
+  "notes": "1-3 sentence summary of the most interesting takeaway"
+}
+
+Score leadScore 1-10 based on fit for Autopilot's $1K/$2K/$3.5K CAS tiers. Never invent facts.`;
 
 // ============================================================================
 // UTILITIES

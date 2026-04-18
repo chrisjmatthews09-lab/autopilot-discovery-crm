@@ -58,9 +58,12 @@ function doPost(e) {
     // Parse the POST body as JSON (sent as text/plain to avoid CORS preflight)
     let payload;
     try {
+      if (!e.postData || !e.postData.contents) {
+        return serveJSON({ error: 'POST body is empty — the request may have been redirected as a GET. Check your client redirect handling.' });
+      }
       payload = JSON.parse(e.postData.contents);
     } catch (parseErr) {
-      return serveJSON({ error: 'Invalid JSON in POST body' });
+      return serveJSON({ error: 'Invalid JSON in POST body: ' + parseErr.toString() });
     }
 
     const action = payload.action;

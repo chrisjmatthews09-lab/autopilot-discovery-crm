@@ -188,13 +188,41 @@ const useAPI = (sheetsUrl) => {
           // GET request
           response = await fetch(`${sheetsUrl}?action=${action}`);
         } else {
-          // POST request with text/plain to avoid CORS preflight
+          // POST request with text/plain to avoid CORS preflight.
+          // Google Apps Script redirects POST → GET on the first hop, losing the body.
+          // Fix: use redirect:'manual' to catch the redirect URL, then re-POST to it.
           const payload = { action, ...data };
-          response = await fetch(sheetsUrl, {
+          const body = JSON.stringify(payload);
+          const headers = { 'Content-Type': 'text/plain' };
+
+          let firstResponse = await fetch(sheetsUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(payload),
+            headers,
+            body,
+            redirect: 'manual',
           });
+
+          if (firstResponse.type === 'opaqueredirect') {
+            // Follow the redirect manually, re-POSTing the body
+            const redirectUrl = firstResponse.headers.get('Location');
+            if (redirectUrl) {
+              response = await fetch(redirectUrl, {
+                method: 'POST',
+                headers,
+                body,
+              });
+            } else {
+              // No Location header — fall back to following redirect normally
+              response = await fetch(sheetsUrl, {
+                method: 'POST',
+                headers,
+                body,
+                redirect: 'follow',
+              });
+            }
+          } else {
+            response = firstResponse;
+          }
         }
 
         if (!response.ok) {

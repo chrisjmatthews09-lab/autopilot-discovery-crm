@@ -1575,9 +1575,662 @@ const inputStyle = {
 };
 
 // Main App Component
+// ==================== V2 SCHEMA CONFIG ====================
+const V2_SCHEMA = {
+  practitioner: {
+    label: 'Practitioners',
+    singular: 'Practitioner',
+    icon: '👥',
+    idPrefix: 'prac',
+    nameField: 'name',
+    orgField: 'firmName',
+    orgLabel: 'Firm Name',
+    coreFields: [
+      { key: 'name', label: 'Full Name', required: true },
+      { key: 'firmName', label: 'Firm Name', required: true },
+      { key: 'role', label: 'Role' },
+      { key: 'email', label: 'Email', type: 'email' },
+      { key: 'phone', label: 'Phone', type: 'tel' },
+      { key: 'location', label: 'Location (City, State)' },
+    ],
+    firmFields: [
+      { key: 'firmType', label: 'Firm Type', type: 'select',
+        options: ['', 'tax', 'bookkeeping', 'tax+bk', 'cas', 'cfo-advisory', 'full-service'] },
+      { key: 'firmSize', label: 'Firm Size', type: 'select',
+        options: ['', 'solo', '2-5', '6-20', '20+'] },
+      { key: 'clientCount', label: 'Client Count' },
+      { key: 'revenueEstimate', label: 'Firm Revenue (range)' },
+      { key: 'yearsInBusiness', label: 'Years in Business' },
+      { key: 'aiSentiment', label: 'AI Sentiment', type: 'select',
+        options: ['', 'positive', 'neutral', 'negative'] },
+    ],
+    richFields: ['specialties', 'techStack', 'painPoints', 'acquisitionSignals'],
+    statusOptions: ['new', 'contacted', 'interested', 'declined'],
+  },
+  business: {
+    label: 'Businesses',
+    singular: 'Business',
+    icon: '🏢',
+    idPrefix: 'biz',
+    nameField: 'name',
+    orgField: 'company',
+    orgLabel: 'Company',
+    coreFields: [
+      { key: 'name', label: 'Owner Name', required: true },
+      { key: 'company', label: 'Company', required: true },
+      { key: 'role', label: 'Role' },
+      { key: 'email', label: 'Email', type: 'email' },
+      { key: 'phone', label: 'Phone', type: 'tel' },
+      { key: 'location', label: 'Location (City, State)' },
+    ],
+    firmFields: [
+      { key: 'industry', label: 'Industry' },
+      { key: 'revenue', label: 'Revenue (range, e.g. $1M-$3M)' },
+      { key: 'employees', label: 'Employees' },
+      { key: 'yearsInBusiness', label: 'Years in Business' },
+      { key: 'currentAccounting', label: 'Current Accounting Setup' },
+      { key: 'monthsBehind', label: 'Months Behind on Books' },
+      { key: 'currentSpend', label: 'Current Annual Accounting Spend' },
+      { key: 'leadScore', label: 'Lead Score (1-10)' },
+    ],
+    richFields: ['painPoints', 'wtpSignals', 'quotableLines'],
+    statusOptions: ['new', 'contacted', 'interested', 'hired', 'declined'],
+  },
+};
+
+// ==================== V2 CONTACT PAGE (shared by practitioners + businesses) ====================
+function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading }) {
+  const cfg = V2_SCHEMA[kind];
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [filter, setFilter] = useState('');
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const emptyForm = { status: 'new' };
+  const [formData, setFormData] = useState(emptyForm);
+
+  const detailRow = rows.find((r) => r.id === detailId);
+  const filtered = rows.filter((r) => {
+    if (!filter) return true;
+    const q = filter.toLowerCase();
+    return [r.name, r.firmName, r.company, r.industry, r.location, r.firmType]
+      .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+  });
+
+  const openNew = () => {
+    setFormData({ status: 'new' });
+    setEditingId(null);
+    setShowForm(true);
+  };
+  const openEdit = (row) => {
+    setFormData(row);
+    setEditingId(row.id);
+    setShowForm(true);
+  };
+  const resetForm = () => {
+    setFormData(emptyForm);
+    setEditingId(null);
+    setShowForm(false);
+  };
+
+  const handleSave = async () => {
+    if (saveStatus === 'saving') return;
+    const missing = cfg.coreFields
+      .filter((f) => f.required && !formData[f.key])
+      .map((f) => f.label);
+    if (missing.length) {
+      alert('Required: ' + missing.join(', '));
+      return;
+    }
+    setSaveStatus('saving');
+    const ok = await onUpsert({
+      ...formData,
+      id: editingId || `${cfg.idPrefix}-${Date.now()}`,
+    });
+    if (ok) {
+      setSaveStatus('success');
+      setTimeout(() => { resetForm(); setSaveStatus('idle'); }, 1200);
+    } else {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2500);
+    }
+  };
+
+  if (detailRow) {
+    return (
+      <ContactDetail
+        row={detailRow}
+        kind={kind}
+        transcripts={transcripts.filter((t) => t.linkedContactId === detailRow.id)}
+        onClose={() => setDetailId(null)}
+        onEdit={() => { setDetailId(null); openEdit(detailRow); }}
+        onDelete={async () => {
+          if (window.confirm(`Delete ${detailRow.name}?`)) {
+            await onDelete(detailRow.id);
+            setDetailId(null);
+          }
+        }}
+        onEnrich={(transcriptId) => onEnrich(kind, detailRow.id, transcriptId)}
+      />
+    );
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ color: COLORS.text, margin: 0 }}>
+          {cfg.icon} {cfg.label} <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({rows.length})</span>
+        </h2>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            type="text"
+            placeholder={`Search ${cfg.label.toLowerCase()}…`}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }}
+          />
+          <button
+            onClick={() => (showForm ? resetForm() : openNew())}
+            style={{ padding: '8px 16px', backgroundColor: showForm ? COLORS.border : COLORS.primary, color: showForm ? COLORS.text : '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
+          >
+            {showForm ? 'Cancel' : `+ Add ${cfg.singular}`}
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <div style={{ backgroundColor: COLORS.card, padding: 20, borderRadius: 8, marginBottom: 20, border: `1px solid ${COLORS.border}` }}>
+          <h3 style={{ marginTop: 0, color: COLORS.text }}>
+            {editingId ? `Edit ${cfg.singular}` : `New ${cfg.singular}`}
+          </h3>
+          <V2Form cfg={cfg} formData={formData} setFormData={setFormData} onSave={handleSave} onCancel={resetForm} saveStatus={saveStatus} isEditing={!!editingId} />
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
+          {rows.length === 0
+            ? `No ${cfg.label.toLowerCase()} yet. Click "+ Add ${cfg.singular}" to create one, or import from the Inbox.`
+            : `No ${cfg.label.toLowerCase()} match "${filter}".`}
+        </div>
+      ) : (
+        <div style={{ backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: kind === 'practitioner' ? '1.3fr 1.6fr 1fr 0.9fr 0.9fr 0.8fr' : '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
+            <div>Name</div>
+            <div>{cfg.orgLabel}</div>
+            <div>{kind === 'practitioner' ? 'Firm Type' : 'Industry'}</div>
+            <div>{kind === 'practitioner' ? 'Size' : 'Revenue'}</div>
+            <div>Status</div>
+            <div style={{ textAlign: 'right' }}>Actions</div>
+          </div>
+          {filtered.map((r) => (
+            <div key={r.id} onClick={() => setDetailId(r.id)} style={{ display: 'grid', gridTemplateColumns: kind === 'practitioner' ? '1.3fr 1.6fr 1fr 0.9fr 0.9fr 0.8fr' : '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center', transition: 'background-color 0.15s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <div style={{ fontWeight: 600, color: COLORS.text }}>
+                {r.name || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(no name)</span>}
+                {r.enrichedAt && <span style={{ marginLeft: 6, fontSize: 10, color: COLORS.success }}>✨</span>}
+              </div>
+              <div style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</div>
+              <div style={{ color: COLORS.textMuted }}>{kind === 'practitioner' ? r.firmType : r.industry || '—'}</div>
+              <div style={{ color: COLORS.textMuted }}>{kind === 'practitioner' ? r.firmSize : r.revenue || '—'}</div>
+              <div><StatusPill status={r.status} /></div>
+              <div style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
+                <button onClick={() => window.confirm(`Delete ${r.name}?`) && onDelete(r.id)} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loading && <div style={{ textAlign: 'center', padding: 16, color: COLORS.textDim }}>Loading…</div>}
+    </div>
+  );
+}
+
+const iconBtn = { background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', fontSize: 14, color: COLORS.textMuted };
+
+function StatusPill({ status }) {
+  const s = status || 'new';
+  const colors = {
+    new: { bg: '#EBF3FC', fg: '#2563A0' },
+    contacted: { bg: '#FBF6E8', fg: '#9A7B2C' },
+    interested: { bg: '#E8F5EE', fg: '#1A5C3A' },
+    hired: { bg: '#F3EFFE', fg: '#6B4FA0' },
+    declined: { bg: '#FCE8E8', fg: '#DC2626' },
+    new_needs_enrichment: { bg: '#FFF0EB', fg: '#C4552D' },
+  };
+  const c = colors[s] || colors.new;
+  return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, backgroundColor: c.bg, color: c.fg, textTransform: 'capitalize' }}>{s.replace(/_/g, ' ')}</span>;
+}
+
+function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEditing }) {
+  const isSaving = saveStatus === 'saving';
+  const isSuccess = saveStatus === 'success';
+  const isError = saveStatus === 'error';
+  const btnLabel = isSaving ? 'Saving…' : isSuccess ? `✓ ${cfg.singular} ${isEditing ? 'Updated' : 'Created'}!` : isError ? '✗ Retry' : 'Save';
+  const allFields = [...cfg.coreFields, ...cfg.firmFields];
+
+  const updateField = (k, v) => setFormData((p) => ({ ...p, [k]: v }));
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        {allFields.map((f) => (
+          <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+              {f.label}{f.required && <span style={{ color: COLORS.danger }}> *</span>}
+            </label>
+            {f.type === 'select' ? (
+              <select value={formData[f.key] || ''} onChange={(e) => updateField(f.key, e.target.value)} style={inputStyle}>
+                {f.options.map((o) => <option key={o} value={o}>{o || '—'}</option>)}
+              </select>
+            ) : (
+              <input type={f.type || 'text'} value={formData[f.key] || ''} onChange={(e) => updateField(f.key, e.target.value)} style={inputStyle} />
+            )}
+          </div>
+        ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Status</label>
+          <select value={formData.status || 'new'} onChange={(e) => updateField('status', e.target.value)} style={inputStyle}>
+            {cfg.statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Interview Date</label>
+          <input type="date" value={formData.interviewDate || ''} onChange={(e) => updateField('interviewDate', e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Notes</label>
+        <textarea value={formData.notes || ''} onChange={(e) => updateField('notes', e.target.value)} style={{ ...inputStyle, width: '100%', minHeight: 80, marginTop: 4 }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+        <button onClick={onCancel} style={{ padding: '10px 16px', backgroundColor: COLORS.border, color: COLORS.text, border: 'none', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
+        <button onClick={onSave} disabled={isSaving || isSuccess} style={{ padding: '10px 18px', minWidth: 160, backgroundColor: isError ? COLORS.danger : COLORS.success, color: '#fff', border: 'none', borderRadius: 6, cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          {isSaving && (<span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'autopilot-spin 0.7s linear infinite' }} />)}
+          {btnLabel}
+        </button>
+      </div>
+      <style>{`@keyframes autopilot-spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ==================== CONTACT DETAIL VIEW ====================
+function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEnrich }) {
+  const cfg = V2_SCHEMA[kind];
+  const [enrichingId, setEnrichingId] = useState(null);
+  const [enrichError, setEnrichError] = useState(null);
+  const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return null; } };
+
+  const pains = parse(row.painPoints);
+  const wtp = parse(row.wtpSignals);
+  const acqSignals = parse(row.acquisitionSignals);
+  const quotes = parse(row.quotableLines);
+  const specialties = parse(row.specialties);
+  const techStack = parse(row.techStack);
+
+  const runEnrich = async (transcriptId) => {
+    setEnrichError(null);
+    setEnrichingId(transcriptId);
+    const ok = await onEnrich(transcriptId);
+    setEnrichingId(null);
+    if (!ok) setEnrichError('Enrichment failed — check API key in Settings and that the Drive file is readable.');
+  };
+
+  return (
+    <div style={{ padding: 20 }}>
+      <button onClick={onClose} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+        ← Back to {cfg.label}
+      </button>
+      <div style={{ backgroundColor: COLORS.card, borderRadius: 12, padding: 28, border: `1px solid ${COLORS.border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <h1 style={{ margin: '0 0 4px', color: COLORS.text, fontFamily: DISPLAY, fontSize: 32 }}>
+              {row.name || '(Unnamed)'}
+              {row.enrichedAt && <span title={`Enriched ${row.enrichedAt}`} style={{ fontSize: 18, marginLeft: 10 }}>✨</span>}
+            </h1>
+            <div style={{ color: COLORS.textMuted, fontSize: 15 }}>
+              {row[cfg.orgField] || '—'}
+              {row.role && <> · {row.role}</>}
+              {row.location && <> · 📍 {row.location}</>}
+            </div>
+            <div style={{ marginTop: 8 }}><StatusPill status={row.status} /></div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onEdit} style={{ padding: '8px 14px', backgroundColor: COLORS.blueLight, color: COLORS.blue, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>✎ Edit</button>
+            <button onClick={onDelete} style={{ padding: '8px 14px', backgroundColor: '#FEF2F2', color: COLORS.danger, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>🗑 Delete</button>
+          </div>
+        </div>
+
+        {/* Top tiles */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
+          {kind === 'business' ? (
+            <>
+              <Tile label="Industry" value={row.industry} />
+              <Tile label="Revenue" value={row.revenue} />
+              <Tile label="Employees" value={row.employees} />
+              <Tile label="Years" value={row.yearsInBusiness} />
+              <Tile label="Lead Score" value={row.leadScore ? `${row.leadScore}/10` : null} />
+            </>
+          ) : (
+            <>
+              <Tile label="Firm Type" value={row.firmType} />
+              <Tile label="Size" value={row.firmSize} />
+              <Tile label="Clients" value={row.clientCount} />
+              <Tile label="Revenue" value={row.revenueEstimate} />
+              <Tile label="Years" value={row.yearsInBusiness} />
+              <Tile label="AI Sentiment" value={row.aiSentiment} />
+            </>
+          )}
+        </div>
+
+        {/* Contact info */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24, fontSize: 13 }}>
+          {row.email && <div><strong>Email:</strong> {row.email}</div>}
+          {row.phone && <div><strong>Phone:</strong> {row.phone}</div>}
+          {row.interviewDate && <div><strong>Interviewed:</strong> {row.interviewDate}</div>}
+          {kind === 'business' && row.currentAccounting && <div><strong>Accounting:</strong> {row.currentAccounting}</div>}
+          {kind === 'business' && row.monthsBehind && <div><strong>Months Behind:</strong> {row.monthsBehind}</div>}
+          {kind === 'business' && row.currentSpend && <div><strong>Current Spend:</strong> {row.currentSpend}</div>}
+        </div>
+
+        {/* Rich sections */}
+        {Array.isArray(pains) && pains.length > 0 && (
+          <Section title="😤 Pain Points">
+            <ChipList items={pains} color={COLORS.danger} />
+          </Section>
+        )}
+        {Array.isArray(specialties) && specialties.length > 0 && (
+          <Section title="🎯 Specialties">
+            <ChipList items={specialties} color={COLORS.primary} />
+          </Section>
+        )}
+        {Array.isArray(techStack) && techStack.length > 0 && (
+          <Section title="🛠 Tech Stack">
+            <ChipList items={techStack} color={COLORS.blue} />
+          </Section>
+        )}
+        {wtp && typeof wtp === 'object' && (
+          <Section title="💰 Willingness-to-Pay Signals">
+            <KVList obj={wtp} />
+          </Section>
+        )}
+        {acqSignals && typeof acqSignals === 'object' && (
+          <Section title="🤝 Acquisition Signals">
+            <KVList obj={acqSignals} />
+          </Section>
+        )}
+        {Array.isArray(quotes) && quotes.length > 0 && (
+          <Section title="💬 Quotable Lines">
+            {quotes.map((q, i) => (
+              <div key={i} style={{ padding: '10px 14px', backgroundColor: COLORS.cardAlt, borderLeft: `3px solid ${COLORS.accent}`, borderRadius: 4, marginBottom: 8, fontStyle: 'italic', fontSize: 13 }}>"{q}"</div>
+            ))}
+          </Section>
+        )}
+        {row.notes && (
+          <Section title="📝 Notes">
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: COLORS.text, whiteSpace: 'pre-wrap' }}>{row.notes}</div>
+          </Section>
+        )}
+
+        {/* Transcripts */}
+        <Section title="📄 Linked Transcripts">
+          {transcripts.length === 0 ? (
+            <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>
+              No transcripts linked. Head to the Inbox to link one when it arrives from Plaud.
+            </div>
+          ) : (
+            transcripts.map((t) => (
+              <div key={t.id} style={{ padding: 14, border: `1px solid ${COLORS.border}`, borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.intervieweeName || 'Interview'} — {t.interviewDate}</div>
+                  <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
+                    Status: {t.status} ·
+                    {t.summaryUrl && <> <a href={t.summaryUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Summary</a></>}
+                    {t.transcriptUrl && <> · <a href={t.transcriptUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Transcript</a></>}
+                  </div>
+                </div>
+                <button
+                  onClick={() => runEnrich(t.id)}
+                  disabled={enrichingId === t.id}
+                  style={{ padding: '8px 14px', backgroundColor: enrichingId === t.id ? COLORS.border : COLORS.purple, color: enrichingId === t.id ? COLORS.textMuted : '#fff', border: 'none', borderRadius: 6, cursor: enrichingId === t.id ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 12 }}
+                >
+                  {enrichingId === t.id ? '⏳ Enriching…' : '✨ Enrich with Claude'}
+                </button>
+              </div>
+            ))
+          )}
+          {enrichError && <div style={{ fontSize: 12, color: COLORS.danger, marginTop: 8 }}>{enrichError}</div>}
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+function Tile({ label, value }) {
+  return (
+    <div style={{ padding: 14, backgroundColor: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
+      <div style={{ fontSize: 10, color: COLORS.textDim, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.text }}>{value || <span style={{ color: COLORS.textDim, fontWeight: 400 }}>—</span>}</div>
+    </div>
+  );
+}
+function Section({ title, children }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <h3 style={{ fontSize: 14, color: COLORS.text, margin: '0 0 10px', fontWeight: 700 }}>{title}</h3>
+      {children}
+    </div>
+  );
+}
+function ChipList({ items, color }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {items.map((it, i) => (
+        <span key={i} style={{ padding: '5px 12px', borderRadius: 14, fontSize: 12, backgroundColor: color + '15', color, border: `1px solid ${color}30` }}>{String(it)}</span>
+      ))}
+    </div>
+  );
+}
+function KVList({ obj }) {
+  const entries = Object.entries(obj).filter(([, v]) => v);
+  if (!entries.length) return <div style={{ fontSize: 12, color: COLORS.textDim, fontStyle: 'italic' }}>No data extracted.</div>;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 6, fontSize: 13 }}>
+      {entries.map(([k, v]) => (
+        <React.Fragment key={k}>
+          <div style={{ color: COLORS.textDim, fontWeight: 600 }}>{k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())}</div>
+          <div style={{ color: COLORS.text }}>{String(v)}</div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// ==================== TRANSCRIPTS INBOX ====================
+function TranscriptsInboxPage({ transcripts, practitioners, businesses, onLinkTranscript, onEnrich, onDelete, onUpsertPractitioner, onUpsertBusiness, loading }) {
+  const [filterStatus, setFilterStatus] = useState('all');
+  const visible = transcripts.filter((t) => filterStatus === 'all' || t.status === filterStatus);
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ color: COLORS.text, margin: 0 }}>📥 Transcripts Inbox <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({transcripts.length})</span></h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {['all', 'new', 'linked', 'enriched'].map((s) => (
+            <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, backgroundColor: filterStatus === s ? COLORS.primary : COLORS.border, color: filterStatus === s ? '#fff' : COLORS.text, textTransform: 'capitalize' }}>{s}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 13, color: COLORS.textMuted, marginBottom: 16, padding: 14, backgroundColor: COLORS.primaryLight, borderRadius: 8, border: `1px solid ${COLORS.primary}20` }}>
+        💡 New interview transcripts from your Plaud → Zapier pipeline land here. For each, link it to an existing Practitioner or Business, then hit <strong>Enrich with Claude</strong> to auto-populate fields from the summary.
+      </div>
+
+      {visible.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
+          {transcripts.length === 0
+            ? 'No transcripts yet. Make sure your Zap is writing to the Transcripts sheet.'
+            : `No transcripts with status "${filterStatus}".`}
+        </div>
+      ) : (
+        visible.map((t) => (
+          <TranscriptRow
+            key={t.id}
+            transcript={t}
+            practitioners={practitioners}
+            businesses={businesses}
+            onLink={onLinkTranscript}
+            onEnrich={onEnrich}
+            onDelete={onDelete}
+            onUpsertPractitioner={onUpsertPractitioner}
+            onUpsertBusiness={onUpsertBusiness}
+          />
+        ))
+      )}
+
+      {loading && <div style={{ textAlign: 'center', padding: 16, color: COLORS.textDim }}>Loading…</div>}
+    </div>
+  );
+}
+
+function TranscriptRow({ transcript, practitioners, businesses, onLink, onEnrich, onDelete, onUpsertPractitioner, onUpsertBusiness }) {
+  const [linkMode, setLinkMode] = useState(null); // null | 'practitioner' | 'business'
+  const [selectedId, setSelectedId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  // Fuzzy-match suggestion
+  const suggestion = (() => {
+    if (!transcript.intervieweeName) return null;
+    const q = transcript.intervieweeName.toLowerCase();
+    const pMatch = practitioners.find((p) => p.name && p.name.toLowerCase().includes(q));
+    if (pMatch) return { kind: 'practitioner', row: pMatch };
+    const bMatch = businesses.find((b) => b.name && b.name.toLowerCase().includes(q));
+    if (bMatch) return { kind: 'business', row: bMatch };
+    return null;
+  })();
+
+  const pool = linkMode === 'practitioner' ? practitioners : linkMode === 'business' ? businesses : [];
+
+  const runLink = async (kind, contactId) => {
+    setBusy(true);
+    setFeedback(null);
+    const ok = await onLink(transcript.id, kind, contactId);
+    setBusy(false);
+    setFeedback(ok ? `✓ Linked to ${kind}` : '✗ Link failed');
+  };
+
+  const runEnrich = async () => {
+    setBusy(true);
+    setFeedback(null);
+    const ok = await onEnrich(transcript.linkedType, transcript.linkedContactId, transcript.id);
+    setBusy(false);
+    setFeedback(ok ? '✓ Enriched' : '✗ Enrichment failed — check Settings API key and Drive permissions.');
+  };
+
+  const createAndLink = async (kind) => {
+    setBusy(true);
+    const newId = `${kind === 'practitioner' ? 'prac' : 'biz'}-${Date.now()}`;
+    const row = {
+      id: newId,
+      name: transcript.intervieweeName || 'New from transcript',
+      status: 'new',
+      interviewDate: transcript.interviewDate,
+      transcriptUrl: transcript.transcriptUrl,
+      summaryUrl: transcript.summaryUrl,
+      source: 'plaud',
+    };
+    const ok = kind === 'practitioner' ? await onUpsertPractitioner(row) : await onUpsertBusiness(row);
+    if (ok) await onLink(transcript.id, kind, newId);
+    setBusy(false);
+    setFeedback(ok ? `✓ Created new ${kind} and linked` : '✗ Failed');
+  };
+
+  const enriched = transcript.status === 'enriched';
+  const linked = transcript.status === 'linked' || enriched;
+
+  return (
+    <div style={{ padding: 16, backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text }}>
+            📄 {transcript.intervieweeName || '(Name not parsed)'}
+            <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, backgroundColor: enriched ? COLORS.primaryLight : linked ? COLORS.blueLight : COLORS.accentLight, color: enriched ? COLORS.primary : linked ? COLORS.blue : COLORS.accent }}>
+              {transcript.status}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4 }}>
+            📅 {transcript.interviewDate}
+            {transcript.summaryUrl && <> · <a href={transcript.summaryUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Summary</a></>}
+            {transcript.transcriptUrl && <> · <a href={transcript.transcriptUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Transcript</a></>}
+          </div>
+        </div>
+        <button onClick={() => window.confirm('Delete this transcript?') && onDelete(transcript.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 14 }}>🗑</button>
+      </div>
+
+      {!linked && suggestion && (
+        <div style={{ padding: 10, backgroundColor: COLORS.primaryLight, borderRadius: 6, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 12 }}>
+            💡 <strong>Suggested match:</strong> {suggestion.row.name}
+            {suggestion.row.firmName && <> @ {suggestion.row.firmName}</>}
+            {suggestion.row.company && <> @ {suggestion.row.company}</>}
+            <span style={{ color: COLORS.textDim }}> ({suggestion.kind})</span>
+          </div>
+          <button onClick={() => runLink(suggestion.kind, suggestion.row.id)} disabled={busy} style={{ padding: '6px 14px', backgroundColor: COLORS.primary, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✓ Link</button>
+        </div>
+      )}
+
+      {!linked && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button onClick={() => setLinkMode(linkMode === 'practitioner' ? null : 'practitioner')} style={{ padding: '6px 12px', backgroundColor: linkMode === 'practitioner' ? COLORS.primary : COLORS.border, color: linkMode === 'practitioner' ? '#fff' : COLORS.text, border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🔗 Link to Practitioner</button>
+          <button onClick={() => setLinkMode(linkMode === 'business' ? null : 'business')} style={{ padding: '6px 12px', backgroundColor: linkMode === 'business' ? COLORS.primary : COLORS.border, color: linkMode === 'business' ? '#fff' : COLORS.text, border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🔗 Link to Business</button>
+          <button onClick={() => createAndLink('practitioner')} disabled={busy} style={{ padding: '6px 12px', backgroundColor: COLORS.accent, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>➕ Create Practitioner</button>
+          <button onClick={() => createAndLink('business')} disabled={busy} style={{ padding: '6px 12px', backgroundColor: COLORS.accent, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>➕ Create Business</button>
+        </div>
+      )}
+
+      {linkMode && (
+        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+            <option value="">Select a {linkMode}…</option>
+            {pool.map((r) => (
+              <option key={r.id} value={r.id}>{r.name} {r.firmName || r.company ? `(${r.firmName || r.company})` : ''}</option>
+            ))}
+          </select>
+          <button onClick={() => selectedId && runLink(linkMode, selectedId)} disabled={!selectedId || busy} style={{ padding: '6px 14px', backgroundColor: COLORS.primary, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Link</button>
+        </div>
+      )}
+
+      {linked && !enriched && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={runEnrich} disabled={busy} style={{ padding: '8px 16px', backgroundColor: COLORS.purple, color: '#fff', border: 'none', borderRadius: 6, cursor: busy ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 13 }}>
+            {busy ? '⏳ Enriching…' : '✨ Enrich with Claude'}
+          </button>
+        </div>
+      )}
+
+      {enriched && (
+        <div style={{ marginTop: 8, fontSize: 12, color: COLORS.success, fontWeight: 600 }}>
+          ✨ Enriched {transcript.processedAt ? `on ${new Date(transcript.processedAt).toLocaleDateString()}` : ''}
+        </div>
+      )}
+
+      {feedback && <div style={{ marginTop: 8, fontSize: 12, color: feedback.startsWith('✓') ? COLORS.success : COLORS.danger }}>{feedback}</div>}
+    </div>
+  );
+}
+
 function App() {
-  const [currentTab, setCurrentTab] = useState('crm');
-  const [contacts, setContacts] = useState([]);
+  const [currentTab, setCurrentTab] = useState('practitioners');
+  const [contacts, setContacts] = useState([]); // legacy, unused in V2 flows
+  const [practitioners, setPractitioners] = useState([]);
+  const [businesses, setBusinesses] = useState([]);
+  const [transcripts, setTranscripts] = useState([]);
   const [sheetsUrl, setSheetsUrl] = useState(() => {
     try {
       return localStorage.getItem('autopilot-sheets-url') || '';
@@ -1603,12 +2256,82 @@ function App() {
       const data = await call('getData');
       if (data) {
         setContacts(data.contacts || []);
+        setPractitioners(data.practitioners || []);
+        setBusinesses(data.businesses || []);
+        setTranscripts(data.transcripts || []);
       }
       setIsInitialized(true);
     };
 
     loadData();
   }, [sheetsUrl]);
+
+  // ===== V2 handlers =====
+  const handleUpsertPractitioner = async (row) => {
+    const result = await call('upsertPractitioner', { data: row });
+    if (result) {
+      setPractitioners((prev) => {
+        const i = prev.findIndex((p) => p.id === row.id);
+        const merged = result.row || row;
+        if (i >= 0) { const u = [...prev]; u[i] = merged; return u; }
+        return [...prev, merged];
+      });
+      return true;
+    }
+    return false;
+  };
+  const handleDeletePractitioner = async (id) => {
+    const result = await call('deletePractitioner', { id });
+    if (result) setPractitioners((prev) => prev.filter((p) => p.id !== id));
+  };
+  const handleUpsertBusiness = async (row) => {
+    const result = await call('upsertBusiness', { data: row });
+    if (result) {
+      setBusinesses((prev) => {
+        const i = prev.findIndex((b) => b.id === row.id);
+        const merged = result.row || row;
+        if (i >= 0) { const u = [...prev]; u[i] = merged; return u; }
+        return [...prev, merged];
+      });
+      return true;
+    }
+    return false;
+  };
+  const handleDeleteBusiness = async (id) => {
+    const result = await call('deleteBusiness', { id });
+    if (result) setBusinesses((prev) => prev.filter((b) => b.id !== id));
+  };
+  const handleLinkTranscript = async (transcriptId, linkedType, linkedContactId) => {
+    const result = await call('linkTranscript', { transcriptId, linkedType, linkedContactId });
+    if (result) {
+      // refresh transcripts + targeted table
+      const data = await call('getData');
+      if (data) {
+        setTranscripts(data.transcripts || []);
+        setPractitioners(data.practitioners || []);
+        setBusinesses(data.businesses || []);
+      }
+      return true;
+    }
+    return false;
+  };
+  const handleEnrichContact = async (contactType, contactId, transcriptId) => {
+    const result = await call('enrichContact', { contactType, contactId, transcriptId });
+    if (result) {
+      const data = await call('getData');
+      if (data) {
+        setTranscripts(data.transcripts || []);
+        setPractitioners(data.practitioners || []);
+        setBusinesses(data.businesses || []);
+      }
+      return true;
+    }
+    return false;
+  };
+  const handleDeleteTranscript = async (id) => {
+    const result = await call('deleteTranscript', { id });
+    if (result) setTranscripts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   // Save sheets URL to localStorage
   useEffect(() => {
@@ -1688,34 +2411,72 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  const inboxCount = transcripts.filter((t) => t.status === 'new').length;
   const TABS = [
-    { id: 'crm', label: 'Contacts' },
-    { id: 'script-pro', label: 'PRO Script' },
-    { id: 'script-biz', label: 'BIZ Script' },
-    { id: 'analysis', label: 'Analyze' },
-    { id: 'settings', label: 'Settings' },
+    { id: 'practitioners', label: '👥 Practitioners' },
+    { id: 'businesses', label: '🏢 Businesses' },
+    { id: 'transcripts', label: `📥 Inbox${inboxCount ? ` (${inboxCount})` : ''}` },
+    { id: 'script-pro', label: '📝 PRO Script' },
+    { id: 'script-biz', label: '📝 BIZ Script' },
+    { id: 'analysis', label: '🧠 Analyze' },
+    { id: 'settings', label: '⚙ Settings' },
+  ];
+
+  const combinedContactsForLegacy = [
+    ...practitioners.map((p) => ({ ...p, type: 'pro', company: p.firmName })),
+    ...businesses.map((b) => ({ ...b, type: 'biz' })),
   ];
 
   const renderContent = () => {
     switch (currentTab) {
-      case 'crm':
+      case 'practitioners':
         return (
-          <CRMPage
-            contacts={contacts}
-            onAdd={handleAddContact}
-            onDelete={handleDeleteContact}
-            onExport={handleExportCSV}
+          <V2ContactPage
+            kind="practitioner"
+            rows={practitioners}
+            transcripts={transcripts}
+            onUpsert={handleUpsertPractitioner}
+            onDelete={handleDeletePractitioner}
+            onLinkTranscript={handleLinkTranscript}
+            onEnrich={handleEnrichContact}
+            loading={loading}
+          />
+        );
+      case 'businesses':
+        return (
+          <V2ContactPage
+            kind="business"
+            rows={businesses}
+            transcripts={transcripts}
+            onUpsert={handleUpsertBusiness}
+            onDelete={handleDeleteBusiness}
+            onLinkTranscript={handleLinkTranscript}
+            onEnrich={handleEnrichContact}
+            loading={loading}
+          />
+        );
+      case 'transcripts':
+        return (
+          <TranscriptsInboxPage
+            transcripts={transcripts}
+            practitioners={practitioners}
+            businesses={businesses}
+            onLinkTranscript={handleLinkTranscript}
+            onEnrich={handleEnrichContact}
+            onDelete={handleDeleteTranscript}
+            onUpsertPractitioner={handleUpsertPractitioner}
+            onUpsertBusiness={handleUpsertBusiness}
             loading={loading}
           />
         );
       case 'script-pro':
-        return <ScriptPage contacts={contacts} scriptType="pro" />;
+        return <ScriptPage contacts={combinedContactsForLegacy} scriptType="pro" />;
       case 'script-biz':
-        return <ScriptPage contacts={contacts} scriptType="biz" />;
+        return <ScriptPage contacts={combinedContactsForLegacy} scriptType="biz" />;
       case 'analysis':
         return (
           <AnalysisPage
-            contacts={contacts}
+            contacts={combinedContactsForLegacy}
             sheetsUrl={sheetsUrl}
             onAnalysisComplete={() => {
               // Refresh data if needed

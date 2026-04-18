@@ -487,3 +487,110 @@ function initializeSpreadsheet() {
   ensureSheets();
   Logger.log('Spreadsheet initialized with all required sheets');
 }
+
+// ============================================================================
+// SCHEMA V2: Practitioners / Businesses / Transcripts
+// ============================================================================
+// Run setupSchemaV2() ONCE from the Apps Script editor to create the new
+// sheets. Safe to run multiple times — it's idempotent and leaves the old
+// "Contacts" sheet untouched so the existing CRM continues to work.
+// ============================================================================
+
+const SCHEMA_V2 = {
+  Practitioners: [
+    'id', 'name', 'firmName', 'role', 'phone', 'email',
+    'firmType', 'firmSize', 'clientCount', 'revenueEstimate', 'yearsInBusiness',
+    'location', 'specialties', 'techStack',
+    'painPoints', 'acquisitionSignals', 'aiSentiment',
+    'status', 'interviewDate',
+    'transcriptUrl', 'summaryUrl', 'enrichedAt',
+    'source', 'notes', 'createdAt', 'updatedAt',
+  ],
+  Businesses: [
+    'id', 'name', 'company', 'role', 'phone', 'email',
+    'industry', 'revenue', 'revenueMidpoint', 'employees', 'yearsInBusiness',
+    'location', 'currentAccounting', 'monthsBehind', 'currentSpend',
+    'painPoints', 'wtpSignals', 'leadScore', 'quotableLines',
+    'status', 'interviewDate',
+    'transcriptUrl', 'summaryUrl', 'enrichedAt',
+    'source', 'notes', 'createdAt', 'updatedAt',
+  ],
+  Transcripts: [
+    'id', 'intervieweeName', 'interviewDate',
+    'transcriptUrl', 'summaryUrl',
+    'linkedType', 'linkedContactId',
+    'status', 'extractedData',
+    'createdAt', 'processedAt',
+  ],
+};
+
+/**
+ * One-time setup: creates Practitioners, Businesses, and Transcripts sheets
+ * with the correct headers. Leaves existing Contacts / Analyses / Synthesis /
+ * Settings sheets untouched.
+ *
+ * HOW TO RUN:
+ *   1. Open this script in the Apps Script editor
+ *   2. In the top toolbar, select "setupSchemaV2" from the function dropdown
+ *   3. Click ▶ Run
+ *   4. Check the execution log — you should see "✅ Schema v2 setup complete"
+ */
+function setupSchemaV2() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const created = [];
+  const updated = [];
+
+  Object.entries(SCHEMA_V2).forEach(([sheetName, headers]) => {
+    let sheet = ss.getSheetByName(sheetName);
+    const isNew = !sheet;
+
+    if (isNew) {
+      sheet = ss.insertSheet(sheetName);
+      created.push(sheetName);
+    }
+
+    // Write / overwrite the header row
+    const currentCols = Math.max(1, sheet.getLastColumn());
+    const currentHeaders = sheet.getRange(1, 1, 1, currentCols).getValues()[0];
+    const headersMatch =
+      currentHeaders.length === headers.length &&
+      headers.every((h, i) => currentHeaders[i] === h);
+
+    if (!headersMatch) {
+      sheet.getRange(1, 1, 1, headers.length)
+        .setValues([headers])
+        .setFontWeight('bold')
+        .setBackground('#E8F5EE')
+        .setFontColor('#1A5C3A');
+      sheet.setFrozenRows(1);
+      sheet.autoResizeColumns(1, headers.length);
+      if (!isNew) updated.push(sheetName);
+    }
+  });
+
+  // Make sure auxiliary sheets exist
+  ['Analyses', 'Synthesis', 'Settings'].forEach((name) => {
+    if (!ss.getSheetByName(name)) {
+      const sheet = ss.insertSheet(name);
+      const hdrs = SHEET_HEADERS[name];
+      if (hdrs) {
+        sheet.getRange(1, 1, 1, hdrs.length).setValues([hdrs]).setFontWeight('bold');
+        sheet.setFrozenRows(1);
+      }
+      created.push(name);
+    }
+  });
+
+  Logger.log('✅ Schema v2 setup complete');
+  Logger.log('Created: ' + (created.length ? created.join(', ') : '(none — all existed)'));
+  Logger.log('Updated headers on: ' + (updated.length ? updated.join(', ') : '(none)'));
+  Logger.log('All sheets now in this spreadsheet:');
+  ss.getSheets().forEach((s) => Logger.log('  • ' + s.getName()));
+
+  return {
+    ok: true,
+    created,
+    updated,
+    allSheets: ss.getSheets().map((s) => s.getName()),
+  };
+}

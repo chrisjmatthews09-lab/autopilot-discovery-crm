@@ -438,6 +438,8 @@ function CRMPage({ contacts, onAdd, onEdit, onDelete, onExport, loading }) {
     notes: '',
     source: '',
   });
+  // 'idle' | 'saving' | 'success' | 'error'
+  const [saveStatus, setSaveStatus] = useState('idle');
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
 
@@ -466,16 +468,29 @@ function CRMPage({ contacts, onAdd, onEdit, onDelete, onExport, loading }) {
   };
 
   const handleSave = async () => {
+    if (saveStatus === 'saving') return; // guard against double-click
     if (!formData.name || !formData.company) {
       alert('Name and company are required');
       return;
     }
-    await onAdd({
+    setSaveStatus('saving');
+    const wasEditing = !!editingId;
+    const ok = await onAdd({
       ...formData,
       id: editingId || `contact-${Date.now()}`,
       updatedAt: new Date().toISOString(),
     });
-    resetForm();
+    if (ok) {
+      setSaveStatus('success');
+      // brief success flash, then reset the form + status
+      setTimeout(() => {
+        resetForm();
+        setSaveStatus('idle');
+      }, 1400);
+    } else {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2500);
+    }
   };
 
   const handleDelete = (id) => {
@@ -519,6 +534,7 @@ function CRMPage({ contacts, onAdd, onEdit, onDelete, onExport, loading }) {
               onSave={handleSave}
               onCancel={resetForm}
               isEditing={!!editingId}
+              saveStatus={saveStatus}
             />
           </div>
         )}
@@ -619,6 +635,8 @@ function CRMPage({ contacts, onAdd, onEdit, onDelete, onExport, loading }) {
             setFormData={setFormData}
             onSave={handleSave}
             onCancel={resetForm}
+            saveStatus={saveStatus}
+            isEditing={!!editingId}
           />
         </div>
       )}
@@ -810,7 +828,18 @@ function CRMPage({ contacts, onAdd, onEdit, onDelete, onExport, loading }) {
   );
 }
 
-function DesktopContactForm({ formData, setFormData, onSave, onCancel }) {
+function DesktopContactForm({ formData, setFormData, onSave, onCancel, saveStatus = 'idle', isEditing = false }) {
+  const isSaving = saveStatus === 'saving';
+  const isSuccess = saveStatus === 'success';
+  const isError = saveStatus === 'error';
+  const btnBg = isSuccess ? COLORS.success : isError ? COLORS.danger : COLORS.success;
+  const btnLabel = isSaving
+    ? (isEditing ? 'Updating…' : 'Saving…')
+    : isSuccess
+    ? (isEditing ? '✓ Contact Updated!' : '✓ Contact Created!')
+    : isError
+    ? '✗ Save Failed — Retry'
+    : 'Save';
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
       <input
@@ -916,23 +945,57 @@ function DesktopContactForm({ formData, setFormData, onSave, onCancel }) {
         </button>
         <button
           onClick={onSave}
+          disabled={isSaving || isSuccess}
           style={{
             padding: '10px 16px',
-            backgroundColor: COLORS.success,
+            minWidth: 170,
+            backgroundColor: btnBg,
             color: '#fff',
             border: 'none',
             borderRadius: '4px',
-            cursor: 'pointer',
+            cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer',
+            opacity: isSaving && !isSuccess ? 0.85 : 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            transition: 'background-color 0.25s ease',
+            fontWeight: 600,
           }}
         >
-          Save
+          {isSaving && (
+            <span
+              style={{
+                display: 'inline-block',
+                width: 14,
+                height: 14,
+                border: '2px solid rgba(255,255,255,0.4)',
+                borderTopColor: '#fff',
+                borderRadius: '50%',
+                animation: 'autopilot-spin 0.7s linear infinite',
+              }}
+            />
+          )}
+          {btnLabel}
         </button>
+        <style>{`@keyframes autopilot-spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>
   );
 }
 
-function MobileContactForm({ formData, setFormData, onSave, onCancel, isEditing }) {
+function MobileContactForm({ formData, setFormData, onSave, onCancel, isEditing, saveStatus = 'idle' }) {
+  const isSaving = saveStatus === 'saving';
+  const isSuccess = saveStatus === 'success';
+  const isError = saveStatus === 'error';
+  const btnBg = isSuccess ? COLORS.success : isError ? COLORS.danger : COLORS.success;
+  const btnLabel = isSaving
+    ? (isEditing ? 'Updating…' : 'Saving…')
+    : isSuccess
+    ? (isEditing ? '✓ Updated!' : '✓ Created!')
+    : isError
+    ? '✗ Retry'
+    : (isEditing ? 'Update' : 'Add');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <input
@@ -1032,17 +1095,38 @@ function MobileContactForm({ formData, setFormData, onSave, onCancel, isEditing 
         </button>
         <button
           onClick={onSave}
+          disabled={isSaving || isSuccess}
           style={{
             flex: 1,
             padding: '10px',
-            backgroundColor: COLORS.success,
+            backgroundColor: btnBg,
             color: '#fff',
             border: 'none',
             borderRadius: '4px',
-            cursor: 'pointer',
+            cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer',
+            opacity: isSaving && !isSuccess ? 0.85 : 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            transition: 'background-color 0.25s ease',
+            fontWeight: 600,
           }}
         >
-          {isEditing ? 'Update' : 'Add'}
+          {isSaving && (
+            <span
+              style={{
+                display: 'inline-block',
+                width: 12,
+                height: 12,
+                border: '2px solid rgba(255,255,255,0.4)',
+                borderTopColor: '#fff',
+                borderRadius: '50%',
+                animation: 'autopilot-spin 0.7s linear infinite',
+              }}
+            />
+          )}
+          {btnLabel}
         </button>
       </div>
     </div>
@@ -1545,7 +1629,9 @@ function App() {
         }
         return [...prev, contact];
       });
+      return true;
     }
+    return false;
   };
 
   const handleDeleteContact = async (id) => {

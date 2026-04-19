@@ -4,8 +4,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuth } from './hooks/useAuth';
 import { useCollection } from './hooks/useCollection';
+import { useWindowWidth } from './hooks/useWindowWidth';
 import { createDoc, updateDoc, deleteDoc } from './data/firestore';
 import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed } from './data/migrate';
+import Sidebar from './components/layout/Sidebar';
+import TopBar from './components/layout/TopBar';
+import MobileNav from './components/layout/MobileNav';
+import DashboardPage from './pages/Dashboard';
+import SettingsPageNew from './pages/Settings';
+import ScriptsWrapper from './pages/Scripts';
 
 // ==================== CONSTANTS ====================
 const COLORS = {
@@ -216,17 +223,7 @@ const useAPI = () => {
   return { call, loading, error, setError };
 };
 
-const useWindowWidth = () => {
-  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
-  useEffect(() => {
-    const handleResize = () => setWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-  return width;
-};
-
-// ==================== SETTINGS PAGE ====================
+// ==================== SETTINGS PAGE (LEGACY — kept for Apps Script URL; superseded by pages/Settings) ====================
 function SettingsPage({ sheetsUrl, setSheetsUrl, apiKey, setApiKey }) {
   const [testLoading, setTestLoading] = useState(false);
   const [testStatus, setTestStatus] = useState(null);
@@ -1640,19 +1637,11 @@ function MainApp({ user, onSignOut }) {
     ...companies.map((c) => ({ ...c, type: 'biz' })),
   ];
 
-  const NAV = [
-    { to: '/people', label: '👥 People' },
-    { to: '/companies', label: '🏢 Companies' },
-    { to: '/interviews', label: '🎙️ Interviews' },
-    { to: '/pipeline', label: '📊 Pipeline' },
-    { to: '/themes', label: '🧠 Themes' },
-    { to: '/scripts/pro', label: '📝 PRO Script' },
-    { to: '/scripts/biz', label: '📝 BIZ Script' },
-  ];
-
   const routes = (
     <Routes>
-      <Route path="/" element={<Navigate to="/people" replace />} />
+      <Route path="/" element={
+        <DashboardPage people={people} companies={companies} interviews={interviews} />
+      } />
       <Route path="/people" element={
         <V2ContactPage kind="person" basePath="/people" rows={people} transcripts={interviews}
           onUpsert={handleUpsertPerson} onDelete={handleDeletePerson}
@@ -1677,13 +1666,17 @@ function MainApp({ user, onSignOut }) {
       <Route path="/interviews/:id" element={
         <InterviewDetailRoute interviews={interviews} people={people} companies={companies} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} />
       } />
-      <Route path="/pipeline" element={
+      <Route path="/board" element={
         <PipelinePage people={people} companies={companies} onUpdateStatus={handleUpdateStatus} />
       } />
-      <Route path="/themes" element={<ThemesPage businesses={companies} practitioners={people} />} />
-      <Route path="/scripts/pro" element={<ScriptPage contacts={combinedContacts} scriptType="pro" />} />
-      <Route path="/scripts/biz" element={<ScriptPage contacts={combinedContacts} scriptType="biz" />} />
-      <Route path="*" element={<Navigate to="/people" replace />} />
+      <Route path="/pipeline" element={<Navigate to="/board" replace />} />
+      <Route path="/insights" element={<ThemesPage businesses={companies} practitioners={people} />} />
+      <Route path="/themes" element={<Navigate to="/insights" replace />} />
+      <Route path="/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} />} />
+      <Route path="/scripts/pro" element={<Navigate to="/scripts" replace />} />
+      <Route path="/scripts/biz" element={<Navigate to="/scripts" replace />} />
+      <Route path="/settings" element={<SettingsPageNew user={user} onSignOut={onSignOut} />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 
@@ -1702,34 +1695,15 @@ function MainApp({ user, onSignOut }) {
       {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
           <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>{routes}</div>
-          <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 60, backgroundColor: COLORS.sidebar, borderTop: `1px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-around', alignItems: 'center', zIndex: 100 }}>
-            {NAV.map((item) => (
-              <NavLink key={item.to} to={item.to}
-                style={({ isActive }) => ({ flex: 1, height: '100%', backgroundColor: isActive ? COLORS.accent : 'transparent', color: isActive ? '#fff' : COLORS.textDim, textDecoration: 'none', fontSize: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 4 })}>
-                {item.label}
-              </NavLink>
-            ))}
-          </div>
+          <MobileNav user={user} onSignOut={onSignOut} />
         </div>
       ) : (
         <div style={{ display: 'flex', width: '100%' }}>
-          <div style={{ width: '200px', backgroundColor: COLORS.sidebar, borderRight: `1px solid ${COLORS.border}`, padding: '20px 12px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <h1 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 20px 8px', color: COLORS.accent }}>Autopilot</h1>
-            {NAV.map((item) => (
-              <NavLink key={item.to} to={item.to}
-                style={({ isActive }) => ({ padding: '10px 12px', backgroundColor: isActive ? COLORS.accent : 'transparent', color: isActive ? '#fff' : COLORS.text, textDecoration: 'none', borderRadius: 6, textAlign: 'left', fontSize: 13, fontWeight: isActive ? 600 : 400, transition: 'all 0.15s' })}>
-                {item.label}
-              </NavLink>
-            ))}
-            <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 11, color: COLORS.textMuted, padding: '0 8px', wordBreak: 'break-all' }}>{user.email}</div>
-              <button onClick={onSignOut}
-                style={{ padding: '8px 12px', background: 'none', color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 12, textAlign: 'left' }}>
-                Sign out
-              </button>
-            </div>
+          <Sidebar user={user} onSignOut={onSignOut} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <TopBar onOpenSearch={() => { /* ⌘K palette ships in Phase 4 */ }} />
+            <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{routes}</div>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{routes}</div>
         </div>
       )}
     </div>

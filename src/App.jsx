@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, NavLink, useNavigate, useParams, useSearchPara
 import { useAuth } from './hooks/useAuth';
 import { useCollection } from './hooks/useCollection';
 import { createDoc, updateDoc, deleteDoc } from './data/firestore';
-import { migrateSheetsToFirestore, hasMigrated } from './data/migrate';
+import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed } from './data/migrate';
 
 // ==================== CONSTANTS ====================
 const COLORS = {
@@ -296,11 +296,11 @@ const inputStyle = {
 
 // ==================== V2 SCHEMA CONFIG ====================
 const V2_SCHEMA = {
-  practitioner: {
-    label: 'Practitioners',
-    singular: 'Practitioner',
+  person: {
+    label: 'People',
+    singular: 'Person',
     icon: '👥',
-    idPrefix: 'prac',
+    idPrefix: 'person',
     nameField: 'name',
     orgField: 'company',
     orgLabel: 'Firm Name',
@@ -323,11 +323,11 @@ const V2_SCHEMA = {
     richFields: ['softwareStack', 'painPoints', 'wtpSignals', 'quotableLines'],
     statusOptions: ['new', 'contacted', 'interested', 'declined'],
   },
-  business: {
-    label: 'Businesses',
-    singular: 'Business',
+  company: {
+    label: 'Companies',
+    singular: 'Company',
     icon: '🏢',
-    idPrefix: 'biz',
+    idPrefix: 'company',
     nameField: 'name',
     orgField: 'company',
     orgLabel: 'Company',
@@ -444,7 +444,7 @@ function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, 
               </div>
               <div style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</div>
               <div style={{ color: COLORS.textMuted }}>{r.industry || '—'}</div>
-              <div style={{ color: COLORS.textMuted }}>{kind === 'practitioner' ? (r.firmSize || '—') : (r.revenue || '—')}</div>
+              <div style={{ color: COLORS.textMuted }}>{kind === 'person' ? (r.firmSize || '—') : (r.revenue || '—')}</div>
               <div><StatusPill status={r.status} /></div>
               <div style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                 <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
@@ -574,7 +574,7 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
-          {kind === 'business' ? (
+          {kind === 'company' ? (
             <>
               <Tile label="Industry" value={row.industry} />
               <Tile label="Revenue" value={row.revenue} />
@@ -597,9 +597,9 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
           {row.email && <div><strong>Email:</strong> {row.email}</div>}
           {row.phone && <div><strong>Phone:</strong> {row.phone}</div>}
           {row.interviewDate && <div><strong>Interviewed:</strong> {row.interviewDate}</div>}
-          {kind === 'business' && row.currentAccounting && <div><strong>Accounting:</strong> {row.currentAccounting}</div>}
-          {kind === 'business' && row.monthsBehind && <div><strong>Months Behind:</strong> {row.monthsBehind}</div>}
-          {kind === 'business' && row.currentSpend && <div><strong>Current Spend:</strong> {row.currentSpend}</div>}
+          {kind === 'company' && row.currentAccounting && <div><strong>Accounting:</strong> {row.currentAccounting}</div>}
+          {kind === 'company' && row.monthsBehind && <div><strong>Months Behind:</strong> {row.monthsBehind}</div>}
+          {kind === 'company' && row.currentSpend && <div><strong>Current Spend:</strong> {row.currentSpend}</div>}
         </div>
 
         {Array.isArray(pains) && pains.length > 0 && (
@@ -1146,73 +1146,83 @@ function App() {
   return <MainApp user={user} onSignOut={signOut} />;
 }
 
+// Translates the new normalized kind to the legacy contactType the Apps Script
+// enrichContact handler expects. Drop this once Code.gs is updated.
+const KIND_TO_LEGACY_CONTACT_TYPE = { person: 'practitioner', company: 'business' };
+
 function MainApp({ user, onSignOut }) {
-  const [migrating, setMigrating] = useState(!hasMigrated());
+  const [migrating, setMigrating] = useState(!hasMigrated() || !hasRenamed());
 
   const { call, loading: apiLoading } = useAPI();
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
 
-  const { data: practitioners, loading: pracLoading } = useCollection('practitioners', { enabled: !migrating });
-  const { data: businesses, loading: bizLoading } = useCollection('businesses', { enabled: !migrating });
-  const { data: transcripts, loading: txLoading } = useCollection('transcripts', { enabled: !migrating });
+  const { data: people, loading: peopleLoading } = useCollection('people', { enabled: !migrating });
+  const { data: companies, loading: companiesLoading } = useCollection('companies', { enabled: !migrating });
+  const { data: interviews, loading: interviewsLoading } = useCollection('interviews', { enabled: !migrating });
 
-  const loading = apiLoading || pracLoading || bizLoading || txLoading;
+  const loading = apiLoading || peopleLoading || companiesLoading || interviewsLoading;
 
   useEffect(() => {
-    if (hasMigrated()) return;
+    if (hasMigrated() && hasRenamed()) return;
     (async () => {
       try {
-        await migrateSheetsToFirestore();
+        if (!hasMigrated()) await migrateSheetsToFirestore();
+        if (!hasRenamed()) await renameCollectionsV2();
       } catch (err) {
-        console.error('Migration failed', err);
+        console.error('Migration/rename failed', err);
       } finally {
         setMigrating(false);
       }
     })();
   }, []);
 
-  const handleUpsertPractitioner = async (row) => {
+  const handleUpsertPerson = async (row) => {
     const { id, ...data } = row;
-    const existing = id && practitioners.some((p) => p.id === id);
+    const existing = id && people.some((p) => p.id === id);
     if (existing) {
-      await updateDoc('practitioners', id, data);
+      await updateDoc('people', id, data);
     } else {
-      const newId = id || `prac-${Date.now()}`;
-      await createDoc('practitioners', data, newId);
+      const newId = id || `person-${Date.now()}`;
+      await createDoc('people', data, newId);
     }
     return true;
   };
 
-  const handleDeletePractitioner = async (id) => {
-    await deleteDoc('practitioners', id);
+  const handleDeletePerson = async (id) => {
+    await deleteDoc('people', id);
   };
 
-  const handleUpsertBusiness = async (row) => {
+  const handleUpsertCompany = async (row) => {
     const { id, ...data } = row;
-    const existing = id && businesses.some((b) => b.id === id);
+    const existing = id && companies.some((c) => c.id === id);
     if (existing) {
-      await updateDoc('businesses', id, data);
+      await updateDoc('companies', id, data);
     } else {
-      const newId = id || `biz-${Date.now()}`;
-      await createDoc('businesses', data, newId);
+      const newId = id || `company-${Date.now()}`;
+      await createDoc('companies', data, newId);
     }
     return true;
   };
 
-  const handleDeleteBusiness = async (id) => {
-    await deleteDoc('businesses', id);
+  const handleDeleteCompany = async (id) => {
+    await deleteDoc('companies', id);
   };
 
-  const handleLinkTranscript = async (transcriptId, linkedType, linkedContactId) => {
-    await updateDoc('transcripts', transcriptId, { linkedType, linkedContactId });
+  const handleLinkInterview = async (interviewId, linkedType, linkedContactId) => {
+    await updateDoc('interviews', interviewId, { linkedType, linkedContactId });
     return true;
   };
 
-  const handleEnrichContact = async (contactType, contactId, transcriptId) => {
-    const result = await call('enrichContact', { contactType, contactId, transcriptId });
+  const handleEnrichContact = async (kind, contactId, interviewId) => {
+    const legacyContactType = KIND_TO_LEGACY_CONTACT_TYPE[kind];
+    const result = await call('enrichContact', {
+      contactType: legacyContactType,
+      contactId,
+      transcriptId: interviewId,
+    });
     if (result && result.row) {
-      const collectionName = contactType === 'business' ? 'businesses' : 'practitioners';
+      const collectionName = kind === 'company' ? 'companies' : 'people';
       const { id, ...data } = result.row;
       await updateDoc(collectionName, contactId, data);
       return true;
@@ -1220,18 +1230,18 @@ function MainApp({ user, onSignOut }) {
     return false;
   };
 
-  const handleDeleteTranscript = async (id) => {
-    await deleteDoc('transcripts', id);
+  const handleDeleteInterview = async (id) => {
+    await deleteDoc('interviews', id);
   };
 
   const combinedContacts = [
-    ...practitioners.map((p) => ({ ...p, type: 'pro' })),
-    ...businesses.map((b) => ({ ...b, type: 'biz' })),
+    ...people.map((p) => ({ ...p, type: 'pro' })),
+    ...companies.map((c) => ({ ...c, type: 'biz' })),
   ];
 
   const NAV = [
-    { to: '/practitioners', label: '👥 Practitioners' },
-    { to: '/businesses', label: '🏢 Businesses' },
+    { to: '/people', label: '👥 People' },
+    { to: '/companies', label: '🏢 Companies' },
     { to: '/themes', label: '🧠 Themes' },
     { to: '/scripts/pro', label: '📝 PRO Script' },
     { to: '/scripts/biz', label: '📝 BIZ Script' },
@@ -1239,29 +1249,29 @@ function MainApp({ user, onSignOut }) {
 
   const routes = (
     <Routes>
-      <Route path="/" element={<Navigate to="/practitioners" replace />} />
-      <Route path="/practitioners" element={
-        <V2ContactPage kind="practitioner" basePath="/practitioners" rows={practitioners} transcripts={transcripts}
-          onUpsert={handleUpsertPractitioner} onDelete={handleDeletePractitioner}
-          onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
+      <Route path="/" element={<Navigate to="/people" replace />} />
+      <Route path="/people" element={
+        <V2ContactPage kind="person" basePath="/people" rows={people} transcripts={interviews}
+          onUpsert={handleUpsertPerson} onDelete={handleDeletePerson}
+          onLinkTranscript={handleLinkInterview} onEnrich={handleEnrichContact} loading={loading} />
       } />
-      <Route path="/practitioners/:id" element={
-        <ContactDetailRoute kind="practitioner" basePath="/practitioners" rows={practitioners}
-          transcripts={transcripts} onDelete={handleDeletePractitioner} onEnrich={handleEnrichContact} />
+      <Route path="/people/:id" element={
+        <ContactDetailRoute kind="person" basePath="/people" rows={people}
+          transcripts={interviews} onDelete={handleDeletePerson} onEnrich={handleEnrichContact} />
       } />
-      <Route path="/businesses" element={
-        <V2ContactPage kind="business" basePath="/businesses" rows={businesses} transcripts={transcripts}
-          onUpsert={handleUpsertBusiness} onDelete={handleDeleteBusiness}
-          onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
+      <Route path="/companies" element={
+        <V2ContactPage kind="company" basePath="/companies" rows={companies} transcripts={interviews}
+          onUpsert={handleUpsertCompany} onDelete={handleDeleteCompany}
+          onLinkTranscript={handleLinkInterview} onEnrich={handleEnrichContact} loading={loading} />
       } />
-      <Route path="/businesses/:id" element={
-        <ContactDetailRoute kind="business" basePath="/businesses" rows={businesses}
-          transcripts={transcripts} onDelete={handleDeleteBusiness} onEnrich={handleEnrichContact} />
+      <Route path="/companies/:id" element={
+        <ContactDetailRoute kind="company" basePath="/companies" rows={companies}
+          transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact} />
       } />
-      <Route path="/themes" element={<ThemesPage businesses={businesses} practitioners={practitioners} />} />
+      <Route path="/themes" element={<ThemesPage businesses={companies} practitioners={people} />} />
       <Route path="/scripts/pro" element={<ScriptPage contacts={combinedContacts} scriptType="pro" />} />
       <Route path="/scripts/biz" element={<ScriptPage contacts={combinedContacts} scriptType="biz" />} />
-      <Route path="*" element={<Navigate to="/practitioners" replace />} />
+      <Route path="*" element={<Navigate to="/people" replace />} />
     </Routes>
   );
 

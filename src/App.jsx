@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from './hooks/useAuth';
+import { useCollection } from './hooks/useCollection';
+import { createDoc, updateDoc, deleteDoc } from './data/firestore';
+import { migrateSheetsToFirestore, hasMigrated } from './data/migrate';
 
 // ==================== CONSTANTS ====================
 const COLORS = {
@@ -1075,92 +1079,117 @@ function KVRow({ label, value }) {
 }
 
 // ==================== MAIN APP ====================
-function App() {
-  const [currentTab, setCurrentTab] = useState('practitioners');
-  const [practitioners, setPractitioners] = useState([]);
-  const [businesses, setBusinesses] = useState([]);
-  const [transcripts, setTranscripts] = useState([]);
-  const [isInitialized, setIsInitialized] = useState(false);
+function SignInScreen({ onSignIn, authError }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: COLORS.bg, color: COLORS.text, fontFamily: FONT }}>
+      <link href="https://fonts.googleapis.com/css2?family=Karla:wght@400;500;600;700;800&family=Fraunces:wght@700;800;900&display=swap" rel="stylesheet" />
+      <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 32, width: 360, textAlign: 'center' }}>
+        <h1 style={{ fontFamily: DISPLAY, fontSize: 28, margin: '0 0 8px', color: COLORS.accent }}>Autopilot</h1>
+        <p style={{ margin: '0 0 24px', color: COLORS.textMuted, fontSize: 14 }}>Discovery CRM</p>
+        <button
+          onClick={onSignIn}
+          style={{ width: '100%', padding: '12px 16px', background: COLORS.primary, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+          Sign in with Google
+        </button>
+        {authError && <div style={{ marginTop: 16, color: COLORS.danger, fontSize: 13 }}>{authError}</div>}
+      </div>
+    </div>
+  );
+}
 
-  const { call, loading } = useAPI();
+function App() {
+  const { user, loading: authLoading, authError, signIn, signOut } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: COLORS.bg, color: COLORS.text }}>
+        Loading…
+      </div>
+    );
+  }
+
+  if (!user) return <SignInScreen onSignIn={signIn} authError={authError} />;
+
+  return <MainApp user={user} onSignOut={signOut} />;
+}
+
+function MainApp({ user, onSignOut }) {
+  const [currentTab, setCurrentTab] = useState('practitioners');
+  const [migrating, setMigrating] = useState(!hasMigrated());
+
+  const { call, loading: apiLoading } = useAPI();
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
 
+  const { data: practitioners, loading: pracLoading } = useCollection('practitioners', { enabled: !migrating });
+  const { data: businesses, loading: bizLoading } = useCollection('businesses', { enabled: !migrating });
+  const { data: transcripts, loading: txLoading } = useCollection('transcripts', { enabled: !migrating });
+
+  const loading = apiLoading || pracLoading || bizLoading || txLoading;
+
   useEffect(() => {
-    const loadData = async () => {
-      const data = await call('getData');
-      if (data) {
-        setPractitioners(data.practitioners || []);
-        setBusinesses(data.businesses || []);
-        setTranscripts(data.transcripts || []);
+    if (hasMigrated()) return;
+    (async () => {
+      try {
+        await migrateSheetsToFirestore();
+      } catch (err) {
+        console.error('Migration failed', err);
+      } finally {
+        setMigrating(false);
       }
-      setIsInitialized(true);
-    };
-    loadData();
+    })();
   }, []);
 
-  const refreshData = async () => {
-    const data = await call('getData');
-    if (data) {
-      setPractitioners(data.practitioners || []);
-      setBusinesses(data.businesses || []);
-      setTranscripts(data.transcripts || []);
-    }
-  };
-
   const handleUpsertPractitioner = async (row) => {
-    const result = await call('upsertPractitioner', { data: row });
-    if (result) {
-      setPractitioners((prev) => {
-        const i = prev.findIndex((p) => p.id === row.id);
-        const merged = result.row || row;
-        if (i >= 0) { const u = [...prev]; u[i] = merged; return u; }
-        return [...prev, merged];
-      });
-      return true;
+    const { id, ...data } = row;
+    const existing = id && practitioners.some((p) => p.id === id);
+    if (existing) {
+      await updateDoc('practitioners', id, data);
+    } else {
+      const newId = id || `prac-${Date.now()}`;
+      await createDoc('practitioners', data, newId);
     }
-    return false;
+    return true;
   };
 
   const handleDeletePractitioner = async (id) => {
-    const result = await call('deletePractitioner', { id });
-    if (result) setPractitioners((prev) => prev.filter((p) => p.id !== id));
+    await deleteDoc('practitioners', id);
   };
 
   const handleUpsertBusiness = async (row) => {
-    const result = await call('upsertBusiness', { data: row });
-    if (result) {
-      setBusinesses((prev) => {
-        const i = prev.findIndex((b) => b.id === row.id);
-        const merged = result.row || row;
-        if (i >= 0) { const u = [...prev]; u[i] = merged; return u; }
-        return [...prev, merged];
-      });
-      return true;
+    const { id, ...data } = row;
+    const existing = id && businesses.some((b) => b.id === id);
+    if (existing) {
+      await updateDoc('businesses', id, data);
+    } else {
+      const newId = id || `biz-${Date.now()}`;
+      await createDoc('businesses', data, newId);
     }
-    return false;
+    return true;
   };
 
   const handleDeleteBusiness = async (id) => {
-    const result = await call('deleteBusiness', { id });
-    if (result) setBusinesses((prev) => prev.filter((b) => b.id !== id));
+    await deleteDoc('businesses', id);
   };
 
   const handleLinkTranscript = async (transcriptId, linkedType, linkedContactId) => {
-    const result = await call('linkTranscript', { transcriptId, linkedType, linkedContactId });
-    if (result) { await refreshData(); return true; }
-    return false;
+    await updateDoc('transcripts', transcriptId, { linkedType, linkedContactId });
+    return true;
   };
 
   const handleEnrichContact = async (contactType, contactId, transcriptId) => {
     const result = await call('enrichContact', { contactType, contactId, transcriptId });
-    if (result) { await refreshData(); return true; }
+    if (result && result.row) {
+      const collectionName = contactType === 'business' ? 'businesses' : 'practitioners';
+      const { id, ...data } = result.row;
+      await updateDoc(collectionName, contactId, data);
+      return true;
+    }
     return false;
   };
 
   const handleDeleteTranscript = async (id) => {
-    const result = await call('deleteTranscript', { id });
-    if (result) setTranscripts((prev) => prev.filter((t) => t.id !== id));
+    await deleteDoc('transcripts', id);
   };
 
   const combinedContacts = [
@@ -1201,10 +1230,10 @@ function App() {
     }
   };
 
-  if (!isInitialized) {
+  if (migrating) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: COLORS.bg, color: COLORS.text }}>
-        Loading…
+        Migrating data to Firestore…
       </div>
     );
   }
@@ -1237,6 +1266,13 @@ function App() {
                 {tab.label}
               </button>
             ))}
+            <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ fontSize: 11, color: COLORS.textMuted, padding: '0 8px', wordBreak: 'break-all' }}>{user.email}</div>
+              <button onClick={onSignOut}
+                style={{ padding: '8px 12px', background: 'none', color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 12, textAlign: 'left' }}>
+                Sign out
+              </button>
+            </div>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{renderContent()}</div>
         </div>

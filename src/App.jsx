@@ -746,13 +746,144 @@ function InterviewsListPage({ interviews, people, companies }) {
   );
 }
 
-function InterviewDetailRoute({ interviews, people, companies, onUpdate }) {
+function PipelinePage({ people, companies, onUpdateStatus }) {
+  const navigate = useNavigate();
+  const [kind, setKind] = useState('person');
+  const [dragId, setDragId] = useState(null);
+  const [overCol, setOverCol] = useState(null);
+
+  const cfg = V2_SCHEMA[kind];
+  const rows = kind === 'company' ? companies : people;
+  const basePath = kind === 'company' ? '/companies' : '/people';
+
+  const columns = cfg.statusOptions;
+  const grouped = columns.reduce((acc, s) => {
+    acc[s] = rows.filter((r) => (r.status || 'new') === s);
+    return acc;
+  }, {});
+
+  const onDrop = async (status) => {
+    const id = dragId;
+    setDragId(null);
+    setOverCol(null);
+    if (!id) return;
+    const row = rows.find((r) => r.id === id);
+    if (!row || (row.status || 'new') === status) return;
+    await onUpdateStatus(kind, id, status);
+  };
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h1 style={{ margin: 0, color: COLORS.text, fontFamily: DISPLAY, fontSize: 24 }}>
+          📊 Pipeline
+        </h1>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setKind('person')}
+            style={{ padding: '6px 14px', borderRadius: 6, border: `1px solid ${kind === 'person' ? COLORS.primary : COLORS.border}`, background: kind === 'person' ? COLORS.primary : 'transparent', color: kind === 'person' ? '#fff' : COLORS.text, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            👥 People
+          </button>
+          <button onClick={() => setKind('company')}
+            style={{ padding: '6px 14px', borderRadius: 6, border: `1px solid ${kind === 'company' ? COLORS.primary : COLORS.border}`, background: kind === 'company' ? COLORS.primary : 'transparent', color: kind === 'company' ? '#fff' : COLORS.text, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            🏢 Companies
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns.length}, minmax(220px, 1fr))`, gap: 12, overflowX: 'auto' }}>
+        {columns.map((status) => (
+          <div key={status}
+            onDragOver={(e) => { e.preventDefault(); setOverCol(status); }}
+            onDragLeave={() => setOverCol((c) => (c === status ? null : c))}
+            onDrop={() => onDrop(status)}
+            style={{ background: overCol === status ? COLORS.cardAlt : COLORS.card, borderRadius: 10, border: `1px solid ${overCol === status ? COLORS.primary : COLORS.border}`, padding: 10, minHeight: 200, transition: 'background 0.1s' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '0 4px' }}>
+              <div style={{ textTransform: 'capitalize', fontSize: 12, fontWeight: 700, color: COLORS.text }}>{status}</div>
+              <div style={{ fontSize: 11, color: COLORS.textMuted, background: COLORS.cardAlt, padding: '2px 8px', borderRadius: 10 }}>{grouped[status].length}</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {grouped[status].map((r) => (
+                <div key={r.id}
+                  draggable
+                  onDragStart={() => setDragId(r.id)}
+                  onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                  onClick={() => navigate(`${basePath}/${r.id}`)}
+                  style={{ background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 10, cursor: 'grab', opacity: dragId === r.id ? 0.5 : 1, fontSize: 13 }}>
+                  <div style={{ fontWeight: 600, color: COLORS.text, marginBottom: 2 }}>{r.name || '(unnamed)'}</div>
+                  {r.company && <div style={{ fontSize: 11, color: COLORS.textMuted }}>{r.company}</div>}
+                  {r.role && <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>{r.role}</div>}
+                </div>
+              ))}
+              {grouped[status].length === 0 && (
+                <div style={{ color: COLORS.textDim, fontSize: 11, fontStyle: 'italic', textAlign: 'center', padding: 12 }}>Drop here</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InterviewTriage({ interview, people, companies, linkPick, setLinkPick, busy, onLinkExisting, onCreateAndLink }) {
+  const options = linkPick.type === 'company' ? companies : people;
+  const sorted = [...options].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  return (
+    <div style={{ marginTop: 12, padding: 14, background: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 10 }}>
+        🔗 Unlinked — triage this interview
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <button onClick={() => setLinkPick({ type: 'person', id: '' })} disabled={busy}
+          style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${linkPick.type === 'person' ? COLORS.primary : COLORS.border}`, background: linkPick.type === 'person' ? COLORS.primary : 'transparent', color: linkPick.type === 'person' ? '#fff' : COLORS.text, cursor: 'pointer', fontSize: 12 }}>
+          👤 Person
+        </button>
+        <button onClick={() => setLinkPick({ type: 'company', id: '' })} disabled={busy}
+          style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${linkPick.type === 'company' ? COLORS.primary : COLORS.border}`, background: linkPick.type === 'company' ? COLORS.primary : 'transparent', color: linkPick.type === 'company' ? '#fff' : COLORS.text, cursor: 'pointer', fontSize: 12 }}>
+          🏢 Company
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <select value={linkPick.id} onChange={(e) => setLinkPick({ ...linkPick, id: e.target.value })} disabled={busy}
+          style={{ flex: 1, padding: '6px 8px', borderRadius: 4, border: `1px solid ${COLORS.border}`, fontSize: 13, background: '#fff' }}>
+          <option value="">— Select an existing {linkPick.type} —</option>
+          {sorted.map((opt) => (
+            <option key={opt.id} value={opt.id}>{opt.name || '(unnamed)'}</option>
+          ))}
+        </select>
+        <button onClick={onLinkExisting} disabled={busy || !linkPick.id}
+          style={{ padding: '6px 14px', borderRadius: 4, border: 'none', background: linkPick.id ? COLORS.primary : COLORS.border, color: '#fff', cursor: linkPick.id ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 600 }}>
+          {busy ? '…' : 'Link'}
+        </button>
+      </div>
+
+      <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 6 }}>Or create a new record from this interview:</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => onCreateAndLink('person')} disabled={busy || !interview.intervieweeName}
+          style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`, background: '#fff', cursor: busy || !interview.intervieweeName ? 'not-allowed' : 'pointer', fontSize: 12, color: COLORS.text }}>
+          ＋ New Person{interview.intervieweeName ? ` "${interview.intervieweeName}"` : ' (no name)'}
+        </button>
+        <button onClick={() => onCreateAndLink('company')} disabled={busy || !(interview.intervieweeBusinessName || interview.intervieweeName)}
+          style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`, background: '#fff', cursor: busy ? 'not-allowed' : 'pointer', fontSize: 12, color: COLORS.text }}>
+          ＋ New Company{interview.intervieweeBusinessName ? ` "${interview.intervieweeBusinessName}"` : ''}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InterviewDetailRoute({ interviews, people, companies, onUpdate, onLink, onCreatePerson, onCreateCompany }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const { call, loading: apiLoading } = useAPI();
   const [tab, setTab] = useState('summary');
   const [fetchingField, setFetchingField] = useState(null);
   const [fetchError, setFetchError] = useState(null);
+  const [linkPick, setLinkPick] = useState({ type: 'person', id: '' });
+  const [linkBusy, setLinkBusy] = useState(false);
 
   const interview = interviews.find((i) => i.id === id);
 
@@ -821,9 +952,40 @@ function InterviewDetailRoute({ interviews, people, companies, onUpdate }) {
                 style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 600, textDecoration: 'underline' }}>
                 {interview.linkedType === 'company' ? '🏢' : '👤'} {linkedRecord.name}
               </button>
+              {' · '}
+              <button onClick={async () => { if (window.confirm('Unlink this interview?')) { await onLink(interview.id, '', ''); } }}
+                style={{ background: 'none', border: 'none', color: COLORS.textMuted, cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>
+                Unlink
+              </button>
             </>
           ) : (
-            <span style={{ color: COLORS.warning }}>Unlinked — link from a Person or Company detail page.</span>
+            <InterviewTriage
+              interview={interview}
+              people={people}
+              companies={companies}
+              linkPick={linkPick}
+              setLinkPick={setLinkPick}
+              busy={linkBusy}
+              onLinkExisting={async () => {
+                if (!linkPick.id) return;
+                setLinkBusy(true);
+                await onLink(interview.id, linkPick.type, linkPick.id);
+                setLinkBusy(false);
+                navigate(`/${linkPick.type === 'company' ? 'companies' : 'people'}/${linkPick.id}`);
+              }}
+              onCreateAndLink={async (kind) => {
+                setLinkBusy(true);
+                const seed = kind === 'company'
+                  ? { name: interview.intervieweeName || interview.intervieweeBusinessName || '', company: interview.intervieweeBusinessName || '', status: 'new' }
+                  : { name: interview.intervieweeName || '', company: interview.intervieweeBusinessName || '', status: 'new' };
+                const newId = `${kind}-${Date.now()}`;
+                if (kind === 'company') await onCreateCompany({ ...seed, id: newId });
+                else await onCreatePerson({ ...seed, id: newId });
+                await onLink(interview.id, kind, newId);
+                setLinkBusy(false);
+                navigate(`/${kind === 'company' ? 'companies' : 'people'}/${newId}`);
+              }}
+            />
           )}
         </div>
       </div>
@@ -1439,6 +1601,11 @@ function MainApp({ user, onSignOut }) {
     await deleteDoc('companies', id);
   };
 
+  const handleUpdateStatus = async (kind, id, status) => {
+    const collectionName = kind === 'company' ? 'companies' : 'people';
+    await updateDoc(collectionName, id, { status });
+  };
+
   const handleLinkInterview = async (interviewId, linkedType, linkedContactId) => {
     await updateDoc('interviews', interviewId, { linkedType, linkedContactId });
     return true;
@@ -1477,6 +1644,7 @@ function MainApp({ user, onSignOut }) {
     { to: '/people', label: '👥 People' },
     { to: '/companies', label: '🏢 Companies' },
     { to: '/interviews', label: '🎙️ Interviews' },
+    { to: '/pipeline', label: '📊 Pipeline' },
     { to: '/themes', label: '🧠 Themes' },
     { to: '/scripts/pro', label: '📝 PRO Script' },
     { to: '/scripts/biz', label: '📝 BIZ Script' },
@@ -1507,7 +1675,10 @@ function MainApp({ user, onSignOut }) {
         <InterviewsListPage interviews={interviews} people={people} companies={companies} />
       } />
       <Route path="/interviews/:id" element={
-        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} onUpdate={handleUpdateInterview} />
+        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} />
+      } />
+      <Route path="/pipeline" element={
+        <PipelinePage people={people} companies={companies} onUpdateStatus={handleUpdateStatus} />
       } />
       <Route path="/themes" element={<ThemesPage businesses={companies} practitioners={people} />} />
       <Route path="/scripts/pro" element={<ScriptPage contacts={combinedContacts} scriptType="pro" />} />

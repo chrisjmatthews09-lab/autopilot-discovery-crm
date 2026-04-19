@@ -635,10 +635,6 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
                     {t.transcriptUrl && <> · <a href={t.transcriptUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Transcript</a></>}
                   </div>
                 </div>
-                <button onClick={() => runEnrich(t.id)} disabled={enrichingId === t.id}
-                  style={{ padding: '8px 14px', backgroundColor: enrichingId === t.id ? COLORS.border : COLORS.purple, color: enrichingId === t.id ? COLORS.textMuted : '#fff', border: 'none', borderRadius: 6, cursor: enrichingId === t.id ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 12 }}>
-                  {enrichingId === t.id ? '⏳ Enriching…' : '✨ Enrich with Claude'}
-                </button>
               </div>
             ))
           )}

@@ -81,7 +81,7 @@ function processNewTranscripts() {
 
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      if (row[idIdx]) continue; // already processed
+      if (row[idIdx]) continue;
       const transcriptUrl = (row[transcriptUrlIdx] || '').toString().trim();
       if (!transcriptUrl) continue;
 
@@ -93,7 +93,6 @@ function processNewTranscripts() {
       const now = new Date().toISOString();
       const rowNum = i + 1;
 
-      // Claim the row immediately to prevent re-processing
       const id = getNextTranscriptId();
       tSheet.getRange(rowNum, idIdx + 1).setValue(id);
       tSheet.getRange(rowNum, statusIdx + 1).setValue('processing');
@@ -239,6 +238,20 @@ function handleUpsertRow(sheetName, idValue, fields) {
       sheet.getRange(rowIndex, col + 1).setValue(serializeCell_(val));
     });
   }
+}
+
+function handleDeleteRow_(sheetName, idValue) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i][0] === idValue) {
+      sheet.deleteRow(i + 2);
+      return true;
+    }
+  }
+  return false;
 }
 
 function serializeCell_(val) {
@@ -392,9 +405,11 @@ leadScore: 1-10 integer. Leave fields blank if not found.`;
 
 function doGet(e) {
   const action = e && e.parameter && e.parameter.action;
-  if (action === 'getTranscripts')    return jsonResponse_(getSheetData_('Transcripts'));
-  if (action === 'getBusinesses')     return jsonResponse_(getSheetData_('Businesses'));
-  if (action === 'getPractitioners')  return jsonResponse_(getSheetData_('Practitioners'));
+  if (action === 'getData')         return jsonResponse_(handleGetData());
+  if (action === 'getTranscripts')  return jsonResponse_(getSheetData_('Transcripts'));
+  if (action === 'getBusinesses')   return jsonResponse_(getSheetData_('Businesses'));
+  if (action === 'getPractitioners') return jsonResponse_(getSheetData_('Practitioners'));
+  if (action === 'getSettings')     return jsonResponse_({ status: 'ok' });
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Autopilot Discovery CRM')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -404,9 +419,17 @@ function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
     const action = body.action || (e.parameter && e.parameter.action);
-    if (action === 'enrichTranscript') {
-      return jsonResponse_(handleEnrichTranscript(body.transcriptId));
-    }
+
+    if (action === 'enrichTranscript')     return jsonResponse_(handleEnrichTranscript(body.transcriptId));
+    if (action === 'enrichContact')        return jsonResponse_(handleEnrichTranscript(body.transcriptId));
+    if (action === 'upsertPractitioner')   return jsonResponse_(handleUpsertContact_('Practitioners', body.data));
+    if (action === 'upsertBusiness')       return jsonResponse_(handleUpsertContact_('Businesses', body.data));
+    if (action === 'deletePractitioner')   return jsonResponse_({ deleted: handleDeleteRow_('Practitioners', body.id) });
+    if (action === 'deleteBusiness')       return jsonResponse_({ deleted: handleDeleteRow_('Businesses', body.id) });
+    if (action === 'deleteTranscript')     return jsonResponse_({ deleted: handleDeleteRow_('Transcripts', body.id) });
+    if (action === 'linkTranscript')       return jsonResponse_(handleLinkTranscript_(body));
+    if (action === 'analyzeThemes')        return jsonResponse_(handleAnalyzeThemes(body));
+
     return jsonResponse_({ error: 'Unknown action: ' + action });
   } catch (err) {
     Logger.log('doPost error: ' + err.message);
@@ -419,21 +442,54 @@ function jsonResponse_(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// ============================================================
+// DATA HANDLERS
+// ============================================================
+
+function handleGetData() {
+  return {
+    practitioners: getSheetData_('Practitioners'),
+    businesses: getSheetData_('Businesses'),
+    transcripts: getSheetData_('Transcripts'),
+    contacts: [],
+  };
+}
+
 function getSheetData_(sheetName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
-  return data.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = row[i]; });
-    return obj;
+  return data.slice(1)
+    .filter(row => row[0]) // skip rows with no ID
+    .map(row => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = row[i] === '' ? '' : row[i]; });
+      return obj;
+    });
+}
+
+function handleUpsertContact_(sheetName, data) {
+  if (!data || !data.id) throw new Error('Missing id in data');
+  const now = new Date().toISOString();
+  handleUpsertRow(sheetName, data.id, { ...data, updatedAt: now });
+  return { status: 'ok', row: data };
+}
+
+function handleLinkTranscript_(body) {
+  const { transcriptId, linkedType, linkedContactId } = body;
+  if (!transcriptId) throw new Error('Missing transcriptId');
+  handleUpsertRow('Transcripts', transcriptId, {
+    linkedType: linkedType || '',
+    linkedContactId: linkedContactId || '',
+    status: 'linked',
   });
+  return { status: 'ok' };
 }
 
 // ============================================================
-// ENRICH EXISTING TRANSCRIPT (UI "Enrich with Claude" button)
+// ENRICH EXISTING TRANSCRIPT
 // ============================================================
 
 function handleEnrichTranscript(transcriptId) {
@@ -495,6 +551,97 @@ function handleEnrichTranscript(transcriptId) {
 }
 
 // ============================================================
+// THEMES ANALYSIS
+// ============================================================
+
+function handleAnalyzeThemes(body) {
+  const apiKey = getSetting_('anthropicApiKey');
+  if (!apiKey) throw new Error('anthropicApiKey not set in Settings sheet');
+
+  const type = body.type || 'business';
+  const sheetName = type === 'practitioner' ? 'Practitioners' : 'Businesses';
+  const rows = getSheetData_(sheetName);
+
+  if (rows.length === 0) return { error: 'No ' + sheetName + ' data to analyze yet.' };
+
+  const enrichedRows = rows.filter(r => r.enrichedAt || r.painPoints);
+  if (enrichedRows.length === 0) return { error: 'No enriched records found. Run the pipeline on at least one interview first.' };
+
+  const summaries = enrichedRows.map(r => {
+    if (type === 'business') {
+      return {
+        company: r.company,
+        industry: r.industry,
+        revenue: r.revenue,
+        employees: r.employees,
+        currentAccounting: r.currentAccounting,
+        currentSpend: r.currentSpend,
+        monthsBehind: r.monthsBehind,
+        painPoints: r.painPoints,
+        wtpSignals: r.wtpSignals,
+        leadScore: r.leadScore,
+        quotableLines: r.quotableLines,
+        notes: r.notes,
+      };
+    } else {
+      return {
+        company: r.company,
+        firmSize: r.firmSize,
+        industry: r.industry,
+        softwareStack: r.softwareStack,
+        clientCount: r.clientCount,
+        avgClientRevenue: r.avgClientRevenue,
+        painPoints: r.painPoints,
+        wtpSignals: r.wtpSignals,
+        leadScore: r.leadScore,
+        quotableLines: r.quotableLines,
+        notes: r.notes,
+      };
+    }
+  });
+
+  const bizPrompt = `You are a strategic market intelligence analyst for a venture-backed accounting technology startup. Analyze these business owner discovery interviews and return strategic insights.
+Return ONLY valid JSON — no markdown fences, no explanation — using this exact schema:
+{
+  "executiveSummary": "3-4 sentence executive overview of market signal strength and key finding",
+  "topPainPoints": [{ "theme": "Pain theme", "frequency": "X of Y interviews", "evidence": "Quote or observation supporting this" }],
+  "wtpProfile": { "priceRange": "$X-$Y/month", "sensitivity": "low|moderate|high", "primaryDrivers": ["driver1", "driver2"], "keyInsight": "one sentence pricing insight" },
+  "idealCustomerProfile": { "revenueRange": "$X-$Y", "industries": ["industry"], "booksBehind": "typical months", "characteristics": ["char1", "char2"], "disqualifiers": ["disqualifier1"] },
+  "competitiveLandscape": [{ "name": "Current solution", "insight": "how they use it and sentiment" }],
+  "keyQuotes": [{ "quote": "verbatim quote", "speaker": "Company name", "significance": "why this matters" }],
+  "strategicRecommendations": [{ "title": "Recommendation", "rationale": "why and what to do" }],
+  "riskFlags": ["risk or concern to watch"]
+}`;
+
+  const pracPrompt = `You are a strategic market intelligence analyst for a venture-backed accounting technology startup. Analyze these accountant/CPA discovery interviews and return strategic insights.
+Return ONLY valid JSON — no markdown fences, no explanation — using this exact schema:
+{
+  "executiveSummary": "3-4 sentence executive overview of the practitioner market and key finding",
+  "topPainPoints": [{ "theme": "Pain theme", "frequency": "X of Y interviews", "evidence": "Quote or observation" }],
+  "firmLandscape": { "dominantSize": "description", "primaryServiceMix": "description", "avgClientCount": "range", "insight": "key structural insight" },
+  "aiReceptivity": { "overall": "positive|mixed|skeptical", "concerns": ["concern1"], "opportunities": ["opportunity1"], "keyInsight": "one sentence on AI positioning" },
+  "techStackInsights": { "dominant": ["tool1", "tool2"], "gaps": ["gap1"], "switchingBarriers": "description" },
+  "partnershipSignals": ["signal or firm type open to partnership"],
+  "pricingBenchmarks": { "typicalMonthlyRange": "$X-$Y", "profitableSegments": ["segment"], "keyInsight": "pricing insight" },
+  "keyQuotes": [{ "quote": "verbatim quote", "speaker": "Firm name", "significance": "why this matters" }],
+  "strategicRecommendations": [{ "title": "Recommendation", "rationale": "why and what to do" }],
+  "riskFlags": ["risk or concern"]
+}`;
+
+  const systemPrompt = type === 'business' ? bizPrompt : pracPrompt;
+  const userContent = 'Interview data (' + enrichedRows.length + ' records):\n\n' + JSON.stringify(summaries, null, 2);
+
+  try {
+    const raw = callAnthropicAPI(apiKey, systemPrompt, userContent, 4096, MODEL_RICH);
+    const themes = JSON.parse(stripCodeFences_(raw));
+    return { themes, recordCount: enrichedRows.length };
+  } catch (e) {
+    Logger.log('analyzeThemes error: ' + e.message);
+    throw new Error('Themes analysis failed: ' + e.message);
+  }
+}
+
+// ============================================================
 // REPAIR / DEBUG HELPERS
 // ============================================================
 
@@ -519,10 +666,10 @@ function debugBiz001() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const bizSheet = ss.getSheetByName('Businesses');
   Logger.log('Businesses headers: ' + JSON.stringify(bizSheet.getRange(1,1,1,bizSheet.getLastColumn()).getValues()[0]));
-  Logger.log('biz-001 row: ' + JSON.stringify(bizSheet.getDataRange().getValues()[1]));
+  if (bizSheet.getLastRow() > 1) Logger.log('biz-001 row: ' + JSON.stringify(bizSheet.getDataRange().getValues()[1]));
   const tSheet = ss.getSheetByName('Transcripts');
   Logger.log('Transcripts headers: ' + JSON.stringify(tSheet.getRange(1,1,1,tSheet.getLastColumn()).getValues()[0]));
-  Logger.log('t-001 row: ' + JSON.stringify(tSheet.getDataRange().getValues()[1]));
+  if (tSheet.getLastRow() > 1) Logger.log('t-001 row: ' + JSON.stringify(tSheet.getDataRange().getValues()[1]));
 }
 
 function testEnrichLatest() {

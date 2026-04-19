@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Routes, Route, Navigate, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { useCollection } from './hooks/useCollection';
 import { createDoc, updateDoc, deleteDoc } from './data/firestore';
@@ -354,17 +355,29 @@ const V2_SCHEMA = {
 };
 
 // ==================== V2 CONTACT PAGE ====================
-function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading }) {
+function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading }) {
   const cfg = V2_SCHEMA[kind];
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editParam = searchParams.get('edit');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [detailId, setDetailId] = useState(null);
   const [filter, setFilter] = useState('');
   const [saveStatus, setSaveStatus] = useState('idle');
   const emptyForm = { status: 'new' };
   const [formData, setFormData] = useState(emptyForm);
 
-  const detailRow = rows.find((r) => r.id === detailId);
+  useEffect(() => {
+    if (!editParam) return;
+    const row = rows.find((r) => r.id === editParam);
+    if (row) {
+      setFormData(row);
+      setEditingId(row.id);
+      setShowForm(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [editParam, rows]);
+
   const filtered = rows.filter((r) => {
     if (!filter) return true;
     const q = filter.toLowerCase();
@@ -385,20 +398,6 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
     if (ok) { setSaveStatus('success'); setTimeout(() => { resetForm(); setSaveStatus('idle'); }, 1200); }
     else { setSaveStatus('error'); setTimeout(() => setSaveStatus('idle'), 2500); }
   };
-
-  if (detailRow) {
-    return (
-      <ContactDetail
-        row={detailRow}
-        kind={kind}
-        transcripts={transcripts.filter((t) => t.linkedContactId === detailRow.id)}
-        onClose={() => setDetailId(null)}
-        onEdit={() => { setDetailId(null); openEdit(detailRow); }}
-        onDelete={async () => { if (window.confirm(`Delete ${detailRow.name}?`)) { await onDelete(detailRow.id); setDetailId(null); } }}
-        onEnrich={(transcriptId) => onEnrich(kind, detailRow.id, transcriptId)}
-      />
-    );
-  }
 
   return (
     <div style={{ padding: 20 }}>
@@ -435,7 +434,7 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
             <div>Name</div><div>{cfg.orgLabel}</div><div>Industry</div><div>Revenue / Size</div><div>Status</div><div style={{ textAlign: 'right' }}>Actions</div>
           </div>
           {filtered.map((r) => (
-            <div key={r.id} onClick={() => setDetailId(r.id)}
+            <div key={r.id} onClick={() => navigate(`${basePath}/${r.id}`)}
               style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
@@ -646,6 +645,40 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
         </Section>
       </div>
     </div>
+  );
+}
+
+function ContactDetailRoute({ kind, basePath, rows, transcripts, onDelete, onEnrich }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const row = rows.find((r) => r.id === id);
+
+  if (!row) {
+    return (
+      <div style={{ padding: 20 }}>
+        <button onClick={() => navigate(basePath)} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          ← Back
+        </button>
+        <div style={{ padding: 40, textAlign: 'center', color: COLORS.textDim }}>Record not found.</div>
+      </div>
+    );
+  }
+
+  return (
+    <ContactDetail
+      row={row}
+      kind={kind}
+      transcripts={transcripts.filter((t) => t.linkedContactId === row.id)}
+      onClose={() => navigate(basePath)}
+      onEdit={() => navigate(`${basePath}?edit=${row.id}`)}
+      onDelete={async () => {
+        if (window.confirm(`Delete ${row.name}?`)) {
+          await onDelete(row.id);
+          navigate(basePath);
+        }
+      }}
+      onEnrich={(transcriptId) => onEnrich(kind, row.id, transcriptId)}
+    />
   );
 }
 
@@ -1114,7 +1147,6 @@ function App() {
 }
 
 function MainApp({ user, onSignOut }) {
-  const [currentTab, setCurrentTab] = useState('practitioners');
   const [migrating, setMigrating] = useState(!hasMigrated());
 
   const { call, loading: apiLoading } = useAPI();
@@ -1197,38 +1229,41 @@ function MainApp({ user, onSignOut }) {
     ...businesses.map((b) => ({ ...b, type: 'biz' })),
   ];
 
-  const TABS = [
-    { id: 'practitioners', label: '👥 Practitioners' },
-    { id: 'businesses', label: '🏢 Businesses' },
-    { id: 'themes', label: '🧠 Themes' },
-    { id: 'script-pro', label: '📝 PRO Script' },
-    { id: 'script-biz', label: '📝 BIZ Script' },
+  const NAV = [
+    { to: '/practitioners', label: '👥 Practitioners' },
+    { to: '/businesses', label: '🏢 Businesses' },
+    { to: '/themes', label: '🧠 Themes' },
+    { to: '/scripts/pro', label: '📝 PRO Script' },
+    { to: '/scripts/biz', label: '📝 BIZ Script' },
   ];
 
-  const renderContent = () => {
-    switch (currentTab) {
-      case 'practitioners':
-        return (
-          <V2ContactPage kind="practitioner" rows={practitioners} transcripts={transcripts}
-            onUpsert={handleUpsertPractitioner} onDelete={handleDeletePractitioner}
-            onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
-        );
-      case 'businesses':
-        return (
-          <V2ContactPage kind="business" rows={businesses} transcripts={transcripts}
-            onUpsert={handleUpsertBusiness} onDelete={handleDeleteBusiness}
-            onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
-        );
-      case 'themes':
-        return <ThemesPage businesses={businesses} practitioners={practitioners} />;
-      case 'script-pro':
-        return <ScriptPage contacts={combinedContacts} scriptType="pro" />;
-      case 'script-biz':
-        return <ScriptPage contacts={combinedContacts} scriptType="biz" />;
-      default:
-        return null;
-    }
-  };
+  const routes = (
+    <Routes>
+      <Route path="/" element={<Navigate to="/practitioners" replace />} />
+      <Route path="/practitioners" element={
+        <V2ContactPage kind="practitioner" basePath="/practitioners" rows={practitioners} transcripts={transcripts}
+          onUpsert={handleUpsertPractitioner} onDelete={handleDeletePractitioner}
+          onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
+      } />
+      <Route path="/practitioners/:id" element={
+        <ContactDetailRoute kind="practitioner" basePath="/practitioners" rows={practitioners}
+          transcripts={transcripts} onDelete={handleDeletePractitioner} onEnrich={handleEnrichContact} />
+      } />
+      <Route path="/businesses" element={
+        <V2ContactPage kind="business" basePath="/businesses" rows={businesses} transcripts={transcripts}
+          onUpsert={handleUpsertBusiness} onDelete={handleDeleteBusiness}
+          onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
+      } />
+      <Route path="/businesses/:id" element={
+        <ContactDetailRoute kind="business" basePath="/businesses" rows={businesses}
+          transcripts={transcripts} onDelete={handleDeleteBusiness} onEnrich={handleEnrichContact} />
+      } />
+      <Route path="/themes" element={<ThemesPage businesses={businesses} practitioners={practitioners} />} />
+      <Route path="/scripts/pro" element={<ScriptPage contacts={combinedContacts} scriptType="pro" />} />
+      <Route path="/scripts/biz" element={<ScriptPage contacts={combinedContacts} scriptType="biz" />} />
+      <Route path="*" element={<Navigate to="/practitioners" replace />} />
+    </Routes>
+  );
 
   if (migrating) {
     return (
@@ -1244,13 +1279,13 @@ function MainApp({ user, onSignOut }) {
 
       {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>{renderContent()}</div>
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>{routes}</div>
           <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 60, backgroundColor: COLORS.sidebar, borderTop: `1px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-around', alignItems: 'center', zIndex: 100 }}>
-            {TABS.map((tab) => (
-              <button key={tab.id} onClick={() => setCurrentTab(tab.id)}
-                style={{ flex: 1, height: '100%', backgroundColor: currentTab === tab.id ? COLORS.accent : 'transparent', color: currentTab === tab.id ? '#fff' : COLORS.textDim, border: 'none', cursor: 'pointer', fontSize: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 4 }}>
-                {tab.label}
-              </button>
+            {NAV.map((item) => (
+              <NavLink key={item.to} to={item.to}
+                style={({ isActive }) => ({ flex: 1, height: '100%', backgroundColor: isActive ? COLORS.accent : 'transparent', color: isActive ? '#fff' : COLORS.textDim, textDecoration: 'none', fontSize: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 4 })}>
+                {item.label}
+              </NavLink>
             ))}
           </div>
         </div>
@@ -1258,13 +1293,11 @@ function MainApp({ user, onSignOut }) {
         <div style={{ display: 'flex', width: '100%' }}>
           <div style={{ width: '200px', backgroundColor: COLORS.sidebar, borderRight: `1px solid ${COLORS.border}`, padding: '20px 12px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <h1 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 20px 8px', color: COLORS.accent }}>Autopilot</h1>
-            {TABS.map((tab) => (
-              <button key={tab.id} onClick={() => setCurrentTab(tab.id)}
-                style={{ padding: '10px 12px', backgroundColor: currentTab === tab.id ? COLORS.accent : 'transparent', color: currentTab === tab.id ? '#fff' : COLORS.text, border: 'none', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontSize: 13, fontWeight: currentTab === tab.id ? 600 : 400, transition: 'all 0.15s' }}
-                onMouseEnter={(e) => { if (currentTab !== tab.id) e.currentTarget.style.backgroundColor = COLORS.border; }}
-                onMouseLeave={(e) => { if (currentTab !== tab.id) e.currentTarget.style.backgroundColor = 'transparent'; }}>
-                {tab.label}
-              </button>
+            {NAV.map((item) => (
+              <NavLink key={item.to} to={item.to}
+                style={({ isActive }) => ({ padding: '10px 12px', backgroundColor: isActive ? COLORS.accent : 'transparent', color: isActive ? '#fff' : COLORS.text, textDecoration: 'none', borderRadius: 6, textAlign: 'left', fontSize: 13, fontWeight: isActive ? 600 : 400, transition: 'all 0.15s' })}>
+                {item.label}
+              </NavLink>
             ))}
             <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ fontSize: 11, color: COLORS.textMuted, padding: '0 8px', wordBreak: 'break-all' }}>{user.email}</div>
@@ -1274,7 +1307,7 @@ function MainApp({ user, onSignOut }) {
               </button>
             </div>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{renderContent()}</div>
+          <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{routes}</div>
         </div>
       )}
     </div>

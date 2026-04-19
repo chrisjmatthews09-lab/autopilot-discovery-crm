@@ -185,29 +185,12 @@ const useAPI = (sheetsUrl) => {
       try {
         let response;
         if (action === 'getData' || action === 'getSettings') {
-          response = await fetch(`${sheetsUrl}?action=${action}`);
+          response = await fetch(`${sheetsUrl}?action=${action}`, { redirect: 'follow' });
         } else {
           const payload = { action, ...data };
           const body = JSON.stringify(payload);
           const headers = { 'Content-Type': 'text/plain' };
-
-          let firstResponse = await fetch(sheetsUrl, {
-            method: 'POST',
-            headers,
-            body,
-            redirect: 'manual',
-          });
-
-          if (firstResponse.type === 'opaqueredirect') {
-            const redirectUrl = firstResponse.headers.get('Location');
-            if (redirectUrl) {
-              response = await fetch(redirectUrl, { method: 'POST', headers, body });
-            } else {
-              response = await fetch(sheetsUrl, { method: 'POST', headers, body, redirect: 'follow' });
-            }
-          } else {
-            response = firstResponse;
-          }
+          response = await fetch(sheetsUrl, { method: 'POST', headers, body, redirect: 'follow' });
         }
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);

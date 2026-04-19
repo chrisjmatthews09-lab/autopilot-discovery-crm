@@ -314,6 +314,24 @@ function readDriveFile_(url) {
     const match = url.match(/\/d\/([\w-]+)/);
     if (!match) return '';
     const fileId = match[1];
+
+    // For Google Docs, export as Markdown to preserve headings/lists/bold.
+    try {
+      const exportUrl = 'https://docs.google.com/document/d/' + fileId + '/export?format=md';
+      const response = UrlFetchApp.fetch(exportUrl, {
+        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+        muteHttpExceptions: true,
+        followRedirects: true,
+      });
+      if (response.getResponseCode() === 200) {
+        const text = response.getContentText();
+        if (text && text.length > 0) return text;
+      }
+    } catch (e) {
+      Logger.log('readDriveFile_ md export failed: ' + e.message);
+    }
+
+    // Fallbacks: DocumentApp plain text, then raw blob.
     try {
       return DocumentApp.openById(fileId).getBody().getText();
     } catch (e) {
@@ -428,6 +446,7 @@ function doGet(e) {
   if (action === 'linkTranscript')      return jsonResponse_(handleLinkTranscript_(body));
   if (action === 'enrichContact')       return jsonResponse_(handleEnrichTranscript(body.transcriptId));
   if (action === 'analyzeThemes')       return jsonResponse_(handleAnalyzeThemes(body));
+  if (action === 'getDriveContent')     return jsonResponse_({ content: readDriveFile_(body.url) });
 
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Autopilot Discovery CRM')

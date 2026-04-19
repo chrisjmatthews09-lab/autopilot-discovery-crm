@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAuth } from './hooks/useAuth';
 import { useCollection } from './hooks/useCollection';
 import { createDoc, updateDoc, deleteDoc } from './data/firestore';
@@ -530,6 +532,7 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
 
 // ==================== CONTACT DETAIL VIEW ====================
 function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEnrich }) {
+  const detailNavigate = useNavigate();
   const cfg = V2_SCHEMA[kind];
   const [enrichingId, setEnrichingId] = useState(null);
   const [enrichError, setEnrichError] = useState(null);
@@ -629,20 +632,247 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
             <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>No transcripts linked.</div>
           ) : (
             transcripts.map((t) => (
-              <div key={t.id} style={{ padding: 14, border: `1px solid ${COLORS.border}`, borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={t.id} onClick={() => detailNavigate(`/interviews/${t.id}`)}
+                style={{ padding: 14, border: `1px solid ${COLORS.border}`, borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{t.intervieweeName || t.intervieweeBusinessName || 'Interview'} — {t.interviewDate}</div>
                   <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
                     Status: {t.status}
-                    {t.summaryUrl && <> · <a href={t.summaryUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Summary</a></>}
-                    {t.transcriptUrl && <> · <a href={t.transcriptUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Transcript</a></>}
+                    {t.summaryText && <> · <span style={{ color: COLORS.success }}>summary cached</span></>}
+                    {t.transcriptText && <> · <span style={{ color: COLORS.success }}>transcript cached</span></>}
                   </div>
                 </div>
+                <div style={{ color: COLORS.textDim, fontSize: 18 }}>›</div>
               </div>
             ))
           )}
           {enrichError && <div style={{ fontSize: 12, color: COLORS.danger, marginTop: 8 }}>{enrichError}</div>}
         </Section>
+      </div>
+    </div>
+  );
+}
+
+function InterviewsListPage({ interviews, people, companies }) {
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  const peopleById = Object.fromEntries(people.map((p) => [p.id, p]));
+  const companiesById = Object.fromEntries(companies.map((c) => [c.id, c]));
+
+  const enriched = interviews.map((iv) => {
+    const linkedRecord = iv.linkedType === 'person' ? peopleById[iv.linkedContactId]
+      : iv.linkedType === 'company' ? companiesById[iv.linkedContactId]
+      : null;
+    return { ...iv, linkedRecord };
+  });
+
+  const filtered = enriched.filter((iv) => {
+    if (filter === 'unlinked' && iv.linkedRecord) return false;
+    if (filter === 'linked' && !iv.linkedRecord) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return [iv.intervieweeName, iv.intervieweeBusinessName, iv.linkedRecord?.name]
+      .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+  });
+
+  const sorted = [...filtered].sort((a, b) =>
+    String(b.interviewDate || '').localeCompare(String(a.interviewDate || ''))
+  );
+
+  const FilterChip = ({ value, label, count }) => (
+    <button onClick={() => setFilter(value)}
+      style={{ padding: '6px 12px', fontSize: 12, borderRadius: 999, border: `1px solid ${filter === value ? COLORS.accent : COLORS.border}`, background: filter === value ? COLORS.accent : COLORS.card, color: filter === value ? '#fff' : COLORS.text, cursor: 'pointer', fontWeight: filter === value ? 600 : 400 }}>
+      {label} <span style={{ opacity: 0.7 }}>({count})</span>
+    </button>
+  );
+
+  const counts = {
+    all: enriched.length,
+    unlinked: enriched.filter((iv) => !iv.linkedRecord).length,
+    linked: enriched.filter((iv) => iv.linkedRecord).length,
+  };
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ color: COLORS.text, margin: 0 }}>
+          🎙️ Interviews <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({interviews.length})</span>
+        </h2>
+        <input type="text" placeholder="Search interviews…" value={search} onChange={(e) => setSearch(e.target.value)}
+          style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <FilterChip value="all" label="All" count={counts.all} />
+        <FilterChip value="unlinked" label="Unlinked" count={counts.unlinked} />
+        <FilterChip value="linked" label="Linked" count={counts.linked} />
+      </div>
+
+      {sorted.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
+          No interviews match.
+        </div>
+      ) : (
+        <div style={{ backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr 0.7fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
+            <div>Interviewee</div><div>Date</div><div>Linked To</div><div>Status</div>
+          </div>
+          {sorted.map((iv) => (
+            <div key={iv.id} onClick={() => navigate(`/interviews/${iv.id}`)}
+              style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr 0.7fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
+              <div style={{ fontWeight: 600 }}>
+                {iv.intervieweeName || iv.intervieweeBusinessName || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(unnamed)</span>}
+              </div>
+              <div style={{ color: COLORS.textMuted }}>{iv.interviewDate || '—'}</div>
+              <div style={{ color: COLORS.textMuted }}>
+                {iv.linkedRecord ? (
+                  <span><span style={{ fontSize: 11, color: COLORS.textDim }}>{iv.linkedType === 'company' ? '🏢' : '👤'}</span> {iv.linkedRecord.name}</span>
+                ) : (
+                  <span style={{ color: COLORS.warning, fontStyle: 'italic' }}>Unlinked</span>
+                )}
+              </div>
+              <div><StatusPill status={iv.status} /></div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InterviewDetailRoute({ interviews, people, companies, onUpdate }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { call, loading: apiLoading } = useAPI();
+  const [tab, setTab] = useState('summary');
+  const [fetchingField, setFetchingField] = useState(null);
+  const [fetchError, setFetchError] = useState(null);
+
+  const interview = interviews.find((i) => i.id === id);
+
+  if (!interview) {
+    return (
+      <div style={{ padding: 20 }}>
+        <button onClick={() => navigate('/interviews')} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          ← Back to Interviews
+        </button>
+        <div style={{ padding: 40, textAlign: 'center', color: COLORS.textDim }}>Interview not found.</div>
+      </div>
+    );
+  }
+
+  const linkedRecord = interview.linkedType === 'person'
+    ? people.find((p) => p.id === interview.linkedContactId)
+    : interview.linkedType === 'company'
+    ? companies.find((c) => c.id === interview.linkedContactId)
+    : null;
+
+  const fetchContent = async (field) => {
+    const url = field === 'summaryText' ? interview.summaryUrl : interview.transcriptUrl;
+    if (!url) { setFetchError('No source URL on file.'); return; }
+    setFetchError(null);
+    setFetchingField(field);
+    const result = await call('getDriveContent', { url });
+    setFetchingField(null);
+    if (result && typeof result.content === 'string') {
+      await onUpdate(interview.id, { [field]: result.content });
+    } else {
+      setFetchError('Failed to fetch from Drive.');
+    }
+  };
+
+  const summaryText = interview.summaryText;
+  const transcriptText = interview.transcriptText;
+  const activeText = tab === 'summary' ? summaryText : transcriptText;
+  const activeField = tab === 'summary' ? 'summaryText' : 'transcriptText';
+  const activeUrl = tab === 'summary' ? interview.summaryUrl : interview.transcriptUrl;
+
+  const TabBtn = ({ value, label, hasContent }) => (
+    <button onClick={() => setTab(value)}
+      style={{ padding: '10px 16px', background: 'none', border: 'none', borderBottom: `2px solid ${tab === value ? COLORS.accent : 'transparent'}`, color: tab === value ? COLORS.text : COLORS.textMuted, cursor: 'pointer', fontSize: 14, fontWeight: tab === value ? 600 : 400 }}>
+      {label} {hasContent && <span style={{ fontSize: 10, color: COLORS.success }}>●</span>}
+    </button>
+  );
+
+  return (
+    <div style={{ padding: 20 }}>
+      <button onClick={() => navigate('/interviews')} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+        ← Back to Interviews
+      </button>
+
+      <div style={{ backgroundColor: COLORS.card, borderRadius: 12, padding: 28, border: `1px solid ${COLORS.border}`, marginBottom: 16 }}>
+        <h1 style={{ margin: '0 0 4px', color: COLORS.text, fontFamily: DISPLAY, fontSize: 28 }}>
+          {interview.intervieweeName || interview.intervieweeBusinessName || 'Untitled Interview'}
+        </h1>
+        <div style={{ color: COLORS.textMuted, fontSize: 14, marginBottom: 12 }}>
+          {interview.interviewDate || 'No date'} · <StatusPill status={interview.status} />
+        </div>
+        <div style={{ fontSize: 13, color: COLORS.textMuted }}>
+          {linkedRecord ? (
+            <>
+              Linked to{' '}
+              <button onClick={() => navigate(`/${interview.linkedType === 'company' ? 'companies' : 'people'}/${linkedRecord.id}`)}
+                style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 600, textDecoration: 'underline' }}>
+                {interview.linkedType === 'company' ? '🏢' : '👤'} {linkedRecord.name}
+              </button>
+            </>
+          ) : (
+            <span style={{ color: COLORS.warning }}>Unlinked — link from a Person or Company detail page.</span>
+          )}
+        </div>
+      </div>
+
+      <div style={{ backgroundColor: COLORS.card, borderRadius: 12, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
+          <TabBtn value="summary" label="📝 Summary" hasContent={!!summaryText} />
+          <TabBtn value="transcript" label="📄 Transcript" hasContent={!!transcriptText} />
+        </div>
+        <div style={{ padding: 24 }}>
+          {activeText ? (
+            <>
+              <div className="markdown-body" style={{ fontFamily: FONT, fontSize: 14, lineHeight: 1.6, color: COLORS.text }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeText}</ReactMarkdown>
+              </div>
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, display: 'flex', gap: 12, fontSize: 12, color: COLORS.textDim }}>
+                <button onClick={() => fetchContent(activeField)} disabled={fetchingField === activeField}
+                  style={{ background: 'none', border: `1px solid ${COLORS.border}`, padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, color: COLORS.textMuted }}>
+                  {fetchingField === activeField ? 'Refreshing…' : '↻ Refresh from Drive'}
+                </button>
+                {activeUrl && <a href={activeUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary, alignSelf: 'center' }}>Open original ↗</a>}
+              </div>
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              {activeUrl ? (
+                <>
+                  <p style={{ color: COLORS.textMuted, marginBottom: 16, fontSize: 14 }}>
+                    {tab === 'summary' ? 'Summary' : 'Transcript'} hasn't been loaded yet.
+                  </p>
+                  <button onClick={() => fetchContent(activeField)} disabled={fetchingField === activeField}
+                    style={{ padding: '10px 20px', background: COLORS.primary, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+                    {fetchingField === activeField ? 'Loading from Drive…' : `Load ${tab === 'summary' ? 'Summary' : 'Transcript'}`}
+                  </button>
+                  {activeUrl && (
+                    <div style={{ marginTop: 12, fontSize: 12 }}>
+                      <a href={activeUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Or open original in Drive ↗</a>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ color: COLORS.textDim, fontStyle: 'italic' }}>
+                  No {tab === 'summary' ? 'summary' : 'transcript'} URL on this interview.
+                </div>
+              )}
+            </div>
+          )}
+          {fetchError && <div style={{ marginTop: 12, color: COLORS.danger, fontSize: 13 }}>{fetchError}</div>}
+        </div>
       </div>
     </div>
   );
@@ -1234,6 +1464,10 @@ function MainApp({ user, onSignOut }) {
     await deleteDoc('interviews', id);
   };
 
+  const handleUpdateInterview = async (id, patch) => {
+    await updateDoc('interviews', id, patch);
+  };
+
   const combinedContacts = [
     ...people.map((p) => ({ ...p, type: 'pro' })),
     ...companies.map((c) => ({ ...c, type: 'biz' })),
@@ -1242,6 +1476,7 @@ function MainApp({ user, onSignOut }) {
   const NAV = [
     { to: '/people', label: '👥 People' },
     { to: '/companies', label: '🏢 Companies' },
+    { to: '/interviews', label: '🎙️ Interviews' },
     { to: '/themes', label: '🧠 Themes' },
     { to: '/scripts/pro', label: '📝 PRO Script' },
     { to: '/scripts/biz', label: '📝 BIZ Script' },
@@ -1267,6 +1502,12 @@ function MainApp({ user, onSignOut }) {
       <Route path="/companies/:id" element={
         <ContactDetailRoute kind="company" basePath="/companies" rows={companies}
           transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact} />
+      } />
+      <Route path="/interviews" element={
+        <InterviewsListPage interviews={interviews} people={people} companies={companies} />
+      } />
+      <Route path="/interviews/:id" element={
+        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} onUpdate={handleUpdateInterview} />
       } />
       <Route path="/themes" element={<ThemesPage businesses={companies} practitioners={people} />} />
       <Route path="/scripts/pro" element={<ScriptPage contacts={combinedContacts} scriptType="pro" />} />

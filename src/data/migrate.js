@@ -1,8 +1,10 @@
 import { APPS_SCRIPT_URL } from '../config/appsScript';
+import { LEGACY_STATUS_TO_LIFECYCLE } from '../config/enums';
 import { listDocs, batchWrite } from './firestore';
 
 const MIGRATION_KEY = 'autopilot-firestore-migrated';
 const RENAME_KEY = 'autopilot-renamed-v2';
+const LIFECYCLE_KEY = 'autopilot-lifecycle-v3';
 
 const COLLECTION_RENAMES = [
   { from: 'practitioners', to: 'people' },
@@ -124,5 +126,42 @@ export async function renameCollectionsV2() {
   }
 
   markRenamed();
+  return { skipped: false, counts };
+}
+
+export function hasLifecycleMigrated() {
+  try { return localStorage.getItem(LIFECYCLE_KEY) === 'true'; } catch { return false; }
+}
+
+export function markLifecycleMigrated() {
+  try { localStorage.setItem(LIFECYCLE_KEY, 'true'); } catch { /* ignore */ }
+}
+
+// One-time: map legacy `status` → `lifecycle_stage` on people and companies.
+// Leaves `status` intact for backward compatibility. `declined` → archived flag.
+export async function migrateLifecycleStages() {
+  if (hasLifecycleMigrated()) return { skipped: true, reason: 'already migrated' };
+
+  const counts = { people: 0, companies: 0 };
+  const ops = [];
+
+  for (const coll of ['people', 'companies']) {
+    const rows = await listDocs(coll);
+    for (const row of rows) {
+      if (row.lifecycle_stage) continue;
+      const mapped = LEGACY_STATUS_TO_LIFECYCLE[row.status] || 'Research-Contact';
+      const patch = { lifecycle_stage: mapped };
+      if (row.status === 'declined') patch.is_archived = true;
+      ops.push({ type: 'update', collection: coll, id: row.id, data: patch });
+      counts[coll] += 1;
+    }
+  }
+
+  const chunkSize = 400;
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    await batchWrite(ops.slice(i, i + chunkSize));
+  }
+
+  markLifecycleMigrated();
   return { skipped: false, counts };
 }

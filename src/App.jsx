@@ -6,7 +6,9 @@ import { useAuth } from './hooks/useAuth';
 import { useCollection } from './hooks/useCollection';
 import { useWindowWidth } from './hooks/useWindowWidth';
 import { createDoc, updateDoc, deleteDoc } from './data/firestore';
-import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed } from './data/migrate';
+import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed, migrateLifecycleStages, hasLifecycleMigrated } from './data/migrate';
+import { LIFECYCLE_STAGES, INDUSTRIES, REVENUE_BANDS, ENTITY_TYPES, US_STATES } from './config/enums';
+import LifecycleStagePill from './components/ui/LifecycleStagePill';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import MobileNav from './components/layout/MobileNav';
@@ -319,8 +321,9 @@ const V2_SCHEMA = {
       { key: 'yearsInPractice', label: 'Years in Practice' },
       { key: 'leadScore', label: 'Lead Score (1-10)' },
     ],
-    richFields: ['softwareStack', 'painPoints', 'wtpSignals', 'quotableLines'],
+    richFields: ['softwareStack', 'painPoints', 'wtpSignals', 'quotableLines', 'known_pains'],
     statusOptions: ['new', 'contacted', 'interested', 'declined'],
+    lifecycleStages: LIFECYCLE_STAGES,
   },
   company: {
     label: 'Companies',
@@ -339,17 +342,22 @@ const V2_SCHEMA = {
       { key: 'location', label: 'Location (City, State)' },
     ],
     firmFields: [
-      { key: 'industry', label: 'Industry' },
-      { key: 'revenue', label: 'Revenue (range, e.g. $1M-$3M)' },
-      { key: 'employees', label: 'Employees' },
+      { key: 'industry', label: 'Industry', type: 'select', options: INDUSTRIES },
+      { key: 'sub_vertical', label: 'Sub-vertical' },
+      { key: 'revenue_band', label: 'Revenue band', type: 'select', options: REVENUE_BANDS },
+      { key: 'revenue', label: 'Revenue (specific)' },
+      { key: 'employee_count', label: 'Employees' },
+      { key: 'entity_type', label: 'Entity type', type: 'select', options: ENTITY_TYPES },
+      { key: 'state', label: 'State', type: 'select', options: US_STATES },
       { key: 'yearsInBusiness', label: 'Years in Business' },
       { key: 'currentAccounting', label: 'Current Accounting Setup' },
       { key: 'monthsBehind', label: 'Months Behind on Books' },
       { key: 'currentSpend', label: 'Current Annual Accounting Spend' },
       { key: 'leadScore', label: 'Lead Score (1-10)' },
     ],
-    richFields: ['painPoints', 'wtpSignals', 'quotableLines'],
+    richFields: ['painPoints', 'wtpSignals', 'quotableLines', 'known_pricing_signals'],
     statusOptions: ['new', 'contacted', 'interested', 'hired', 'declined'],
+    lifecycleStages: LIFECYCLE_STAGES,
   },
 };
 
@@ -444,7 +452,7 @@ function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, 
               <div style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</div>
               <div style={{ color: COLORS.textMuted }}>{r.industry || '—'}</div>
               <div style={{ color: COLORS.textMuted }}>{kind === 'person' ? (r.firmSize || '—') : (r.revenue || '—')}</div>
-              <div><StatusPill status={r.status} /></div>
+              <div>{r.lifecycle_stage ? <LifecycleStagePill stage={r.lifecycle_stage} /> : <StatusPill status={r.status} />}</div>
               <div style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                 <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
                 <button onClick={() => window.confirm(`Delete ${r.name}?`) && onDelete(r.id)} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
@@ -500,7 +508,13 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
           </div>
         ))}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Status</label>
+          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Lifecycle Stage</label>
+          <select value={formData.lifecycle_stage || 'Research-Contact'} onChange={(e) => updateField('lifecycle_stage', e.target.value)} style={inputStyle}>
+            {(cfg.lifecycleStages || LIFECYCLE_STAGES).map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Status (legacy)</label>
           <select value={formData.status || 'new'} onChange={(e) => updateField('status', e.target.value)} style={inputStyle}>
             {cfg.statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -565,7 +579,7 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
               {row.role && <> · {row.role}</>}
               {row.location && <> · 📍 {row.location}</>}
             </div>
-            <div style={{ marginTop: 8 }}><StatusPill status={row.status} /></div>
+            <div style={{ marginTop: 8 }}>{row.lifecycle_stage ? <LifecycleStagePill stage={row.lifecycle_stage} size="lg" /> : <StatusPill status={row.status} />}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={onEdit} style={{ padding: '8px 14px', backgroundColor: COLORS.blueLight, color: COLORS.blue, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>✎ Edit</button>
@@ -1540,7 +1554,7 @@ function App() {
 const KIND_TO_LEGACY_CONTACT_TYPE = { person: 'practitioner', company: 'business' };
 
 function MainApp({ user, onSignOut }) {
-  const [migrating, setMigrating] = useState(!hasMigrated() || !hasRenamed());
+  const [migrating, setMigrating] = useState(!hasMigrated() || !hasRenamed() || !hasLifecycleMigrated());
 
   const { call, loading: apiLoading } = useAPI();
   const windowWidth = useWindowWidth();
@@ -1553,11 +1567,12 @@ function MainApp({ user, onSignOut }) {
   const loading = apiLoading || peopleLoading || companiesLoading || interviewsLoading;
 
   useEffect(() => {
-    if (hasMigrated() && hasRenamed()) return;
+    if (hasMigrated() && hasRenamed() && hasLifecycleMigrated()) return;
     (async () => {
       try {
         if (!hasMigrated()) await migrateSheetsToFirestore();
         if (!hasRenamed()) await renameCollectionsV2();
+        if (!hasLifecycleMigrated()) await migrateLifecycleStages();
       } catch (err) {
         console.error('Migration/rename failed', err);
       } finally {

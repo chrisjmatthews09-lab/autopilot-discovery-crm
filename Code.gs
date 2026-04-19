@@ -6,7 +6,6 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL_FAST = 'claude-haiku-4-5-20251001';
 const MODEL_RICH = 'claude-opus-4-5';
 
-// Single source of truth for all sheet column orders
 const SHEET_HEADERS = {
   Transcripts: [
     'id', 'intervieweeName', 'intervieweeBusinessName', 'interviewDate',
@@ -45,6 +44,133 @@ const SHEET_HEADERS = {
 };
 
 // ============================================================
+// TRIGGER — fires when Zapier writes a row to the sheet
+// ============================================================
+
+function onTranscriptRowEdit(e) {
+  processNewTranscripts();
+}
+
+// ============================================================
+// CORE PROCESSOR — finds unprocessed rows and runs the pipeline
+// ============================================================
+
+function processNewTranscripts() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    Logger.log('Could not acquire lock — another run in progress');
+    return;
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const tSheet = ss.getSheetByName('Transcripts');
+    if (!tSheet || tSheet.getLastRow() < 2) return;
+
+    const apiKey = getSetting_('anthropicApiKey');
+    if (!apiKey) { Logger.log('ERROR: anthropicApiKey not set in Settings'); return; }
+
+    const data = tSheet.getDataRange().getValues();
+    const headers = data[0];
+    const idIdx = headers.indexOf('id');
+    const transcriptUrlIdx = headers.indexOf('transcriptUrl');
+    const summaryUrlIdx = headers.indexOf('summaryUrl');
+    const interviewDateIdx = headers.indexOf('interviewDate');
+    const intervieweeNameIdx = headers.indexOf('intervieweeName');
+    const statusIdx = headers.indexOf('status');
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (row[idIdx]) continue; // already processed
+      const transcriptUrl = (row[transcriptUrlIdx] || '').toString().trim();
+      if (!transcriptUrl) continue;
+
+      const summaryUrl = (row[summaryUrlIdx] || '').toString().trim();
+      const rawTitle = (row[intervieweeNameIdx] || '').toString().trim();
+      const interviewDate = row[interviewDateIdx]
+        ? new Date(row[interviewDateIdx]).toISOString()
+        : new Date().toISOString();
+      const now = new Date().toISOString();
+      const rowNum = i + 1;
+
+      // Claim the row immediately to prevent re-processing
+      const id = getNextTranscriptId();
+      tSheet.getRange(rowNum, idIdx + 1).setValue(id);
+      tSheet.getRange(rowNum, statusIdx + 1).setValue('processing');
+      tSheet.getRange(rowNum, intervieweeNameIdx + 1).setValue('');
+      SpreadsheetApp.flush();
+
+      Logger.log('Processing: ' + id + ' | ' + transcriptUrl);
+
+      try {
+        const transcriptText = readDriveFile_(transcriptUrl);
+        const summaryText = readDriveFile_(summaryUrl);
+        const sourceText = [summaryText, transcriptText].filter(Boolean).join('\n\n---\n\n');
+
+        if (!sourceText) {
+          tSheet.getRange(rowNum, statusIdx + 1).setValue('error-no-source');
+          continue;
+        }
+
+        const classification = classifyInterview(apiKey, sourceText, rawTitle);
+        const interviewType = classification.type || 'business';
+        Logger.log('Classified as: ' + interviewType);
+
+        let contactId, enriched;
+
+        if (interviewType === 'practitioner') {
+          contactId = getNextPractitionerId();
+          enriched = enrichPractitioner(apiKey, sourceText);
+          handleUpsertRow('Practitioners', contactId, {
+            ...enriched,
+            status: 'enriched',
+            interviewDate,
+            transcriptUrl,
+            summaryUrl,
+            enrichedAt: now,
+            source: 'zapier',
+            createdAt: now,
+            updatedAt: now,
+          });
+        } else {
+          contactId = getNextBusinessId();
+          enriched = enrichBusiness(apiKey, sourceText);
+          handleUpsertRow('Businesses', contactId, {
+            ...enriched,
+            status: 'enriched',
+            interviewDate,
+            transcriptUrl,
+            summaryUrl,
+            enrichedAt: now,
+            source: 'zapier',
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+
+        handleUpsertRow('Transcripts', id, {
+          intervieweeName: enriched.name || '',
+          intervieweeBusinessName: enriched.company || '',
+          linkedType: interviewType,
+          linkedContactId: contactId,
+          status: 'enriched',
+          extractedData: JSON.stringify({ rawAnalysis: JSON.stringify(enriched) }),
+          processedAt: now,
+        });
+
+        Logger.log('Complete: ' + id + ' → ' + contactId);
+
+      } catch (e) {
+        Logger.log('Error on ' + id + ': ' + e.message);
+        tSheet.getRange(rowNum, statusIdx + 1).setValue('error: ' + e.message.substring(0, 80));
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ============================================================
 // SHEET SETUP
 // ============================================================
 
@@ -52,9 +178,7 @@ function setupSchemaV2() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   Object.entries(SHEET_HEADERS).forEach(([name, headers]) => {
     let sheet = ss.getSheetByName(name);
-    if (!sheet) {
-      sheet = ss.insertSheet(name);
-    }
+    if (!sheet) sheet = ss.insertSheet(name);
     const existing = sheet.getLastColumn() > 0
       ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
       : [];
@@ -62,11 +186,8 @@ function setupSchemaV2() {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     }
   });
-
-  // Remove legacy Contacts sheet if present
   const contacts = ss.getSheetByName('Contacts');
   if (contacts) ss.deleteSheet(contacts);
-
   Logger.log('setupSchemaV2 complete');
 }
 
@@ -74,17 +195,9 @@ function setupSchemaV2() {
 // SEQUENTIAL ID GENERATORS
 // ============================================================
 
-function getNextTranscriptId() {
-  return getNextId_('Transcripts', 't');
-}
-
-function getNextPractitionerId() {
-  return getNextId_('Practitioners', 'prac');
-}
-
-function getNextBusinessId() {
-  return getNextId_('Businesses', 'biz');
-}
+function getNextTranscriptId()   { return getNextId_('Transcripts',   't'); }
+function getNextPractitionerId() { return getNextId_('Practitioners', 'prac'); }
+function getNextBusinessId()     { return getNextId_('Businesses',    'biz'); }
 
 function getNextId_(sheetName, prefix) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -92,13 +205,13 @@ function getNextId_(sheetName, prefix) {
   if (!sheet || sheet.getLastRow() < 2) return prefix + '-001';
   const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues()
     .map(r => r[0]).filter(v => typeof v === 'string' && v.startsWith(prefix + '-'));
-  if (ids.length === 0) return prefix + '-001';
+  if (!ids.length) return prefix + '-001';
   const max = Math.max(...ids.map(id => parseInt(id.split('-')[1], 10) || 0));
   return prefix + '-' + String(max + 1).padStart(3, '0');
 }
 
 // ============================================================
-// GENERIC UPSERT ROW (uses SHEET_HEADERS for column mapping)
+// GENERIC UPSERT ROW
 // ============================================================
 
 function handleUpsertRow(sheetName, idValue, fields) {
@@ -106,9 +219,8 @@ function handleUpsertRow(sheetName, idValue, fields) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error('Sheet not found: ' + sheetName);
   const headers = SHEET_HEADERS[sheetName];
-  if (!headers) throw new Error('No SHEET_HEADERS defined for: ' + sheetName);
+  if (!headers) throw new Error('No SHEET_HEADERS for: ' + sheetName);
 
-  // Find existing row by ID
   let rowIndex = -1;
   if (sheet.getLastRow() >= 2) {
     const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
@@ -118,15 +230,9 @@ function handleUpsertRow(sheetName, idValue, fields) {
   }
 
   if (rowIndex === -1) {
-    // Append new row
-    const row = headers.map(h => {
-      if (h === 'id') return idValue;
-      const val = fields[h];
-      return serializeCell_(val);
-    });
+    const row = headers.map(h => h === 'id' ? idValue : serializeCell_(fields[h]));
     sheet.appendRow(row);
   } else {
-    // Update existing row field by field
     Object.entries(fields).forEach(([key, val]) => {
       const col = headers.indexOf(key);
       if (col === -1) return;
@@ -162,9 +268,8 @@ function getSetting_(key) {
 // ============================================================
 
 function callAnthropicAPI(apiKey, systemPrompt, userContent, maxTokens, model) {
-  const m = model || MODEL_RICH;
   const payload = {
-    model: m,
+    model: model || MODEL_RICH,
     max_tokens: maxTokens || 1024,
     system: systemPrompt,
     messages: [{ role: 'user', content: userContent }],
@@ -172,10 +277,7 @@ function callAnthropicAPI(apiKey, systemPrompt, userContent, maxTokens, model) {
   const options = {
     method: 'post',
     contentType: 'application/json',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true,
   };
@@ -185,7 +287,6 @@ function callAnthropicAPI(apiKey, systemPrompt, userContent, maxTokens, model) {
   return result.content[0].text;
 }
 
-// Strip markdown code fences from Claude responses
 function stripCodeFences_(text) {
   return (text || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
 }
@@ -201,12 +302,9 @@ function readDriveFile_(url) {
     if (!match) return '';
     const fileId = match[1];
     try {
-      const doc = DocumentApp.openById(fileId);
-      return doc.getBody().getText();
+      return DocumentApp.openById(fileId).getBody().getText();
     } catch (e) {
-      const file = DriveApp.getFileById(fileId);
-      const blob = file.getBlob();
-      return blob.getDataAsString();
+      return DriveApp.getFileById(fileId).getBlob().getDataAsString();
     }
   } catch (e) {
     Logger.log('readDriveFile_ error: ' + e.message);
@@ -220,26 +318,19 @@ function readDriveFile_(url) {
 
 function classifyInterview(apiKey, sourceText, rawTitle) {
   const system = `You are classifying a discovery interview transcript.
-Return ONLY valid JSON with no markdown fences, no explanation.
-Schema:
-{
-  "type": "practitioner" or "business",
-  "intervieweeName": "First Last or empty string",
-  "intervieweeBusinessName": "Company name or empty string"
-}
+Return ONLY valid JSON — no markdown fences, no explanation.
+Schema: { "type": "practitioner" or "business", "intervieweeName": "First Last or empty string", "intervieweeBusinessName": "Company name or empty string" }
 Rules:
 - "practitioner" = accountant, CPA, bookkeeper, tax professional
 - "business" = business owner, entrepreneur, operator
 - intervieweeName: extract from transcript content only. Never use the document title "${rawTitle}". Leave blank if not found.
-- intervieweeBusinessName: extract from transcript content. Leave blank if not found.`;
+- intervieweeBusinessName: extract from content. Leave blank if not found.`;
 
-  const user = sourceText.substring(0, 8000);
-  const raw = callAnthropicAPI(apiKey, system, user, 256, MODEL_FAST);
-  const cleaned = stripCodeFences_(raw);
+  const raw = callAnthropicAPI(apiKey, system, sourceText.substring(0, 8000), 256, MODEL_FAST);
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(stripCodeFences_(raw));
   } catch (e) {
-    Logger.log('classifyInterview parse error: ' + e.message + ' | raw: ' + raw);
+    Logger.log('classifyInterview parse error: ' + e.message);
     return { type: 'business', intervieweeName: '', intervieweeBusinessName: '' };
   }
 }
@@ -250,211 +341,48 @@ Rules:
 
 function enrichBusiness(apiKey, sourceText) {
   const system = `You are extracting structured data from a business owner discovery interview.
-Return ONLY valid JSON with no markdown fences, no explanation.
+Return ONLY valid JSON — no markdown fences, no explanation.
 Schema:
 {
-  "name": "",
-  "company": "",
-  "role": "",
-  "phone": "",
-  "email": "",
-  "industry": "",
-  "revenue": "",
-  "revenueMidpoint": "",
-  "employees": "",
-  "yearsInBusiness": "",
-  "location": "",
-  "currentAccounting": "",
-  "monthsBehind": "",
-  "currentSpend": "",
+  "name": "", "company": "", "role": "", "phone": "", "email": "",
+  "industry": "", "revenue": "", "revenueMidpoint": "", "employees": "",
+  "yearsInBusiness": "", "location": "", "currentAccounting": "",
+  "monthsBehind": "", "currentSpend": "",
   "painPoints": [],
-  "wtpSignals": {
-    "namedPrice": "",
-    "ownerTimeDisplacement": "",
-    "decisionMakingBlindness": "",
-    "compliancePressure": "",
-    "priorBadExperience": ""
-  },
-  "leadScore": 0,
-  "quotableLines": [],
-  "notes": ""
+  "wtpSignals": { "namedPrice": "", "ownerTimeDisplacement": "", "decisionMakingBlindness": "", "compliancePressure": "", "priorBadExperience": "" },
+  "leadScore": 0, "quotableLines": [], "notes": ""
 }
-leadScore: 1-10 integer. quotableLines: verbatim quotes. Leave fields blank if not found.`;
+leadScore: 1-10 integer. Leave fields blank if not found.`;
 
-  const user = sourceText.substring(0, 12000);
-  const raw = callAnthropicAPI(apiKey, system, user, 2048, MODEL_RICH);
-  const cleaned = stripCodeFences_(raw);
+  const raw = callAnthropicAPI(apiKey, system, sourceText.substring(0, 12000), 2048, MODEL_RICH);
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(stripCodeFences_(raw));
   } catch (e) {
-    Logger.log('enrichBusiness parse error: ' + e.message + ' | raw: ' + raw);
-    throw new Error('Failed to parse enrichment response: ' + e.message);
+    Logger.log('enrichBusiness parse error: ' + e.message);
+    throw new Error('Failed to parse business enrichment: ' + e.message);
   }
 }
 
 function enrichPractitioner(apiKey, sourceText) {
   const system = `You are extracting structured data from an accountant/CPA discovery interview.
-Return ONLY valid JSON with no markdown fences, no explanation.
+Return ONLY valid JSON — no markdown fences, no explanation.
 Schema:
 {
-  "name": "",
-  "company": "",
-  "role": "",
-  "phone": "",
-  "email": "",
-  "industry": "",
-  "firmSize": "",
-  "yearsInPractice": "",
-  "location": "",
-  "softwareStack": [],
-  "clientCount": "",
-  "avgClientRevenue": "",
+  "name": "", "company": "", "role": "", "phone": "", "email": "",
+  "industry": "", "firmSize": "", "yearsInPractice": "", "location": "",
+  "softwareStack": [], "clientCount": "", "avgClientRevenue": "",
   "painPoints": [],
-  "wtpSignals": {
-    "namedPrice": "",
-    "ownerTimeDisplacement": "",
-    "decisionMakingBlindness": "",
-    "compliancePressure": "",
-    "priorBadExperience": ""
-  },
-  "leadScore": 0,
-  "quotableLines": [],
-  "notes": ""
+  "wtpSignals": { "namedPrice": "", "ownerTimeDisplacement": "", "decisionMakingBlindness": "", "compliancePressure": "", "priorBadExperience": "" },
+  "leadScore": 0, "quotableLines": [], "notes": ""
 }
-leadScore: 1-10 integer. quotableLines: verbatim quotes. Leave fields blank if not found.`;
+leadScore: 1-10 integer. Leave fields blank if not found.`;
 
-  const user = sourceText.substring(0, 12000);
-  const raw = callAnthropicAPI(apiKey, system, user, 2048, MODEL_RICH);
-  const cleaned = stripCodeFences_(raw);
+  const raw = callAnthropicAPI(apiKey, system, sourceText.substring(0, 12000), 2048, MODEL_RICH);
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(stripCodeFences_(raw));
   } catch (e) {
-    Logger.log('enrichPractitioner parse error: ' + e.message + ' | raw: ' + raw);
-    throw new Error('Failed to parse enrichment response: ' + e.message);
-  }
-}
-
-// ============================================================
-// CORE INGEST PIPELINE
-// ============================================================
-
-function handleIngestTranscript(data) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-
-  try {
-    const apiKey = getSetting_('anthropicApiKey');
-    if (!apiKey) throw new Error('anthropicApiKey not set in Settings sheet');
-
-    const now = new Date().toISOString();
-    const transcriptUrl = data.transcriptUrl || '';
-    const summaryUrl = data.summaryUrl || '';
-    const rawTitle = data.intervieweeName || '';
-
-    // Dedup by transcriptUrl
-    const tSheet = ss.getSheetByName('Transcripts');
-    if (transcriptUrl && tSheet.getLastRow() >= 2) {
-      const urls = tSheet.getRange(2, SHEET_HEADERS.Transcripts.indexOf('transcriptUrl') + 1,
-        tSheet.getLastRow() - 1, 1).getValues();
-      for (let i = 0; i < urls.length; i++) {
-        if (urls[i][0] === transcriptUrl) {
-          Logger.log('Duplicate transcriptUrl — skipping: ' + transcriptUrl);
-          lock.releaseLock();
-          return { status: 'duplicate', message: 'Already ingested' };
-        }
-      }
-    }
-
-    // Create transcript row (names always blank until Claude extracts)
-    const id = getNextTranscriptId();
-    handleUpsertRow('Transcripts', id, {
-      intervieweeName: '',
-      intervieweeBusinessName: '',
-      interviewDate: data.interviewDate || now,
-      transcriptUrl,
-      summaryUrl,
-      linkedType: '',
-      linkedContactId: '',
-      status: 'new',
-      extractedData: '',
-      createdAt: now,
-      processedAt: '',
-    });
-
-    lock.releaseLock();
-
-    // Read Drive files
-    const transcriptText = readDriveFile_(transcriptUrl);
-    const summaryText = readDriveFile_(summaryUrl);
-    const sourceText = [summaryText, transcriptText].filter(Boolean).join('\n\n---\n\n');
-
-    if (!sourceText) {
-      handleUpsertRow('Transcripts', id, { status: 'error-no-source' });
-      return { status: 'error', message: 'Could not read Drive files' };
-    }
-
-    // Classify
-    Logger.log('Classifying interview ' + id + '...');
-    const classification = classifyInterview(apiKey, sourceText, rawTitle);
-    Logger.log('Classification: ' + JSON.stringify(classification));
-
-    const interviewType = classification.type || 'business';
-    const intervieweeName = classification.intervieweeName || '';
-    const intervieweeBusinessName = classification.intervieweeBusinessName || '';
-
-    // Create contact row
-    let contactId;
-    let enriched;
-
-    if (interviewType === 'practitioner') {
-      contactId = getNextPractitionerId();
-      enriched = enrichPractitioner(apiKey, sourceText);
-      handleUpsertRow('Practitioners', contactId, {
-        ...enriched,
-        status: 'enriched',
-        interviewDate: data.interviewDate || now,
-        transcriptUrl,
-        summaryUrl,
-        enrichedAt: new Date().toISOString(),
-        source: 'zapier',
-        createdAt: now,
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      contactId = getNextBusinessId();
-      enriched = enrichBusiness(apiKey, sourceText);
-      handleUpsertRow('Businesses', contactId, {
-        ...enriched,
-        status: 'enriched',
-        interviewDate: data.interviewDate || now,
-        transcriptUrl,
-        summaryUrl,
-        enrichedAt: new Date().toISOString(),
-        source: 'zapier',
-        createdAt: now,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-
-    // Update transcript row with classification + link
-    handleUpsertRow('Transcripts', id, {
-      intervieweeName: enriched.name || intervieweeName,
-      intervieweeBusinessName: enriched.company || intervieweeBusinessName,
-      linkedType: interviewType,
-      linkedContactId: contactId,
-      status: 'enriched',
-      extractedData: JSON.stringify({ rawAnalysis: JSON.stringify(enriched), overallSentiment: 'unclear' }),
-      processedAt: new Date().toISOString(),
-    });
-
-    Logger.log('Pipeline complete: ' + id + ' → ' + contactId);
-    return { status: 'success', transcriptId: id, contactId, contactType: interviewType };
-
-  } catch (e) {
-    Logger.log('handleIngestTranscript error: ' + e.message);
-    lock.releaseLock();
-    throw e;
+    Logger.log('enrichPractitioner parse error: ' + e.message);
+    throw new Error('Failed to parse practitioner enrichment: ' + e.message);
   }
 }
 
@@ -464,9 +392,9 @@ function handleIngestTranscript(data) {
 
 function doGet(e) {
   const action = e && e.parameter && e.parameter.action;
-  if (action === 'getTranscripts') return handleGetTranscripts();
-  if (action === 'getBusinesses') return handleGetContacts('Businesses');
-  if (action === 'getPractitioners') return handleGetContacts('Practitioners');
+  if (action === 'getTranscripts')    return jsonResponse_(getSheetData_('Transcripts'));
+  if (action === 'getBusinesses')     return jsonResponse_(getSheetData_('Businesses'));
+  if (action === 'getPractitioners')  return jsonResponse_(getSheetData_('Practitioners'));
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Autopilot Discovery CRM')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -476,14 +404,8 @@ function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
     const action = body.action || (e.parameter && e.parameter.action);
-
-    if (action === 'ingestTranscript') {
-      const result = handleIngestTranscript(body);
-      return jsonResponse_(result);
-    }
     if (action === 'enrichTranscript') {
-      const result = handleEnrichTranscript(body.transcriptId);
-      return jsonResponse_(result);
+      return jsonResponse_(handleEnrichTranscript(body.transcriptId));
     }
     return jsonResponse_({ error: 'Unknown action: ' + action });
   } catch (err) {
@@ -495,100 +417,6 @@ function doPost(e) {
 function jsonResponse_(data) {
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
-}
-
-// ============================================================
-// ENRICH EXISTING TRANSCRIPT (UI button handler)
-// ============================================================
-
-function handleEnrichTranscript(transcriptId) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const apiKey = getSetting_('anthropicApiKey');
-  if (!apiKey) throw new Error('anthropicApiKey not set in Settings sheet');
-
-  const tSheet = ss.getSheetByName('Transcripts');
-  const tData = tSheet.getDataRange().getValues();
-  const tHeaders = tData[0];
-
-  const rowIdx = tData.findIndex((r, i) => i > 0 && r[0] === transcriptId);
-  if (rowIdx === -1) throw new Error('Transcript not found: ' + transcriptId);
-
-  const row = tData[rowIdx];
-  const transcriptUrl = row[tHeaders.indexOf('transcriptUrl')];
-  const summaryUrl = row[tHeaders.indexOf('summaryUrl')];
-  const linkedType = row[tHeaders.indexOf('linkedType')];
-  const linkedContactId = row[tHeaders.indexOf('linkedContactId')];
-
-  const transcriptText = readDriveFile_(transcriptUrl);
-  const summaryText = readDriveFile_(summaryUrl);
-  const sourceText = [summaryText, transcriptText].filter(Boolean).join('\n\n---\n\n');
-  if (!sourceText) throw new Error('Could not read Drive files');
-
-  const interviewDate = row[tHeaders.indexOf('interviewDate')];
-  const now = new Date().toISOString();
-
-  let contactId = linkedContactId;
-  let interviewType = linkedType;
-  let enriched;
-
-  if (!interviewType || !contactId) {
-    const rawTitle = row[tHeaders.indexOf('intervieweeName')] || '';
-    const classification = classifyInterview(apiKey, sourceText, rawTitle);
-    interviewType = classification.type || 'business';
-    contactId = interviewType === 'practitioner' ? getNextPractitionerId() : getNextBusinessId();
-  }
-
-  if (interviewType === 'practitioner') {
-    enriched = enrichPractitioner(apiKey, sourceText);
-    handleUpsertRow('Practitioners', contactId, {
-      ...enriched,
-      status: 'enriched',
-      interviewDate,
-      transcriptUrl,
-      summaryUrl,
-      enrichedAt: now,
-      source: 'manual',
-      createdAt: now,
-      updatedAt: now,
-    });
-  } else {
-    enriched = enrichBusiness(apiKey, sourceText);
-    handleUpsertRow('Businesses', contactId, {
-      ...enriched,
-      status: 'enriched',
-      interviewDate,
-      transcriptUrl,
-      summaryUrl,
-      enrichedAt: now,
-      source: 'manual',
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  handleUpsertRow('Transcripts', transcriptId, {
-    intervieweeName: enriched.name || '',
-    intervieweeBusinessName: enriched.company || '',
-    linkedType: interviewType,
-    linkedContactId: contactId,
-    status: 'enriched',
-    extractedData: JSON.stringify({ rawAnalysis: JSON.stringify(enriched) }),
-    processedAt: now,
-  });
-
-  return { status: 'success', contactId, contactType: interviewType };
-}
-
-// ============================================================
-// GET HANDLERS (for UI data loading)
-// ============================================================
-
-function handleGetTranscripts() {
-  return jsonResponse_(getSheetData_('Transcripts'));
-}
-
-function handleGetContacts(sheetName) {
-  return jsonResponse_(getSheetData_(sheetName));
 }
 
 function getSheetData_(sheetName) {
@@ -605,176 +433,203 @@ function getSheetData_(sheetName) {
 }
 
 // ============================================================
-// REPAIR / TEST HELPERS
+// ENRICH EXISTING TRANSCRIPT (UI "Enrich with Claude" button)
 // ============================================================
 
-function debugDeployment() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  Object.keys(SHEET_HEADERS).forEach(name => {
-    const sheet = ss.getSheetByName(name);
-    if (!sheet) { Logger.log(name + ': MISSING'); return; }
-    const cols = sheet.getLastColumn();
-    Logger.log(name + ': ' + cols + ' columns, expected ' + SHEET_HEADERS[name].length);
-  });
-  Logger.log('SHEET_HEADERS.Transcripts: ' + JSON.stringify(SHEET_HEADERS.Transcripts));
-  Logger.log('Deployment check complete');
-}
+function handleEnrichTranscript(transcriptId) {
+  const apiKey = getSetting_('anthropicApiKey');
+  if (!apiKey) throw new Error('anthropicApiKey not set in Settings sheet');
 
-function debugApiKey() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const settings = ss.getSheetByName('Settings');
-  if (!settings) { Logger.log('Settings sheet MISSING'); return; }
-  const data = settings.getDataRange().getValues();
-  data.forEach(row => Logger.log(row[0] + ': ' + (row[1] ? row[1].toString().substring(0, 10) + '...' : 'MISSING')));
-}
-
-function testEnrichLatest() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const tSheet = ss.getSheetByName('Transcripts');
   const tData = tSheet.getDataRange().getValues();
   const tHeaders = tData[0];
-  const linkedIdx = tHeaders.indexOf('linkedContactId');
+  const rowIdx = tData.findIndex((r, i) => i > 0 && r[0] === transcriptId);
+  if (rowIdx === -1) throw new Error('Transcript not found: ' + transcriptId);
 
+  const row = tData[rowIdx];
+  const transcriptUrl = row[tHeaders.indexOf('transcriptUrl')];
+  const summaryUrl    = row[tHeaders.indexOf('summaryUrl')];
+  const interviewDate = row[tHeaders.indexOf('interviewDate')];
+  let linkedType      = row[tHeaders.indexOf('linkedType')];
+  let contactId       = row[tHeaders.indexOf('linkedContactId')];
+  const now = new Date().toISOString();
+
+  const transcriptText = readDriveFile_(transcriptUrl);
+  const summaryText    = readDriveFile_(summaryUrl);
+  const sourceText = [summaryText, transcriptText].filter(Boolean).join('\n\n---\n\n');
+  if (!sourceText) throw new Error('Could not read Drive files — check permissions');
+
+  if (!linkedType || !contactId) {
+    const classification = classifyInterview(apiKey, sourceText, '');
+    linkedType = classification.type || 'business';
+    contactId  = linkedType === 'practitioner' ? getNextPractitionerId() : getNextBusinessId();
+  }
+
+  let enriched;
+  if (linkedType === 'practitioner') {
+    enriched = enrichPractitioner(apiKey, sourceText);
+    handleUpsertRow('Practitioners', contactId, {
+      ...enriched, status: 'enriched', interviewDate,
+      transcriptUrl, summaryUrl, enrichedAt: now, source: 'manual', createdAt: now, updatedAt: now,
+    });
+  } else {
+    enriched = enrichBusiness(apiKey, sourceText);
+    handleUpsertRow('Businesses', contactId, {
+      ...enriched, status: 'enriched', interviewDate,
+      transcriptUrl, summaryUrl, enrichedAt: now, source: 'manual', createdAt: now, updatedAt: now,
+    });
+  }
+
+  handleUpsertRow('Transcripts', transcriptId, {
+    intervieweeName: enriched.name || '',
+    intervieweeBusinessName: enriched.company || '',
+    linkedType,
+    linkedContactId: contactId,
+    status: 'enriched',
+    extractedData: JSON.stringify({ rawAnalysis: JSON.stringify(enriched) }),
+    processedAt: now,
+  });
+
+  return { status: 'success', contactId, contactType: linkedType };
+}
+
+// ============================================================
+// REPAIR / DEBUG HELPERS
+// ============================================================
+
+function debugDeployment() {
+  Object.keys(SHEET_HEADERS).forEach(name => {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+    if (!sheet) { Logger.log(name + ': MISSING'); return; }
+    Logger.log(name + ': ' + sheet.getLastColumn() + ' cols, expected ' + SHEET_HEADERS[name].length);
+  });
+  Logger.log('Transcripts headers: ' + JSON.stringify(SHEET_HEADERS.Transcripts));
+}
+
+function debugApiKey() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Settings');
+  if (!sheet) { Logger.log('Settings sheet MISSING'); return; }
+  sheet.getDataRange().getValues().forEach(row =>
+    Logger.log(row[0] + ': ' + (row[1] ? row[1].toString().substring(0, 10) + '...' : 'MISSING'))
+  );
+}
+
+function debugBiz001() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const bizSheet = ss.getSheetByName('Businesses');
+  Logger.log('Businesses headers: ' + JSON.stringify(bizSheet.getRange(1,1,1,bizSheet.getLastColumn()).getValues()[0]));
+  Logger.log('biz-001 row: ' + JSON.stringify(bizSheet.getDataRange().getValues()[1]));
+  const tSheet = ss.getSheetByName('Transcripts');
+  Logger.log('Transcripts headers: ' + JSON.stringify(tSheet.getRange(1,1,1,tSheet.getLastColumn()).getValues()[0]));
+  Logger.log('t-001 row: ' + JSON.stringify(tSheet.getDataRange().getValues()[1]));
+}
+
+function testEnrichLatest() {
+  const tSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Transcripts');
+  const tData = tSheet.getDataRange().getValues();
+  const linkedIdx = tData[0].indexOf('linkedContactId');
   let latestRow = null;
   for (let i = tData.length - 1; i >= 1; i--) {
     if (tData[i][linkedIdx]) { latestRow = tData[i]; break; }
   }
   if (!latestRow) { Logger.log('No linked transcript found'); return; }
-
-  const transcriptId = latestRow[0];
-  Logger.log('Enriching transcript: ' + transcriptId);
-  const result = handleEnrichTranscript(transcriptId);
-  Logger.log('Result: ' + JSON.stringify(result));
+  Logger.log('Enriching: ' + latestRow[0]);
+  Logger.log(JSON.stringify(handleEnrichTranscript(latestRow[0])));
 }
 
 function reclassifyT001() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const apiKey = getSetting_('anthropicApiKey');
-  if (!apiKey) { Logger.log('ERROR: anthropicApiKey not set'); return; }
+  if (!apiKey) { Logger.log('ERROR: no API key'); return; }
 
   const tSheet = ss.getSheetByName('Transcripts');
   const tData = tSheet.getDataRange().getValues();
   const tHeaders = tData[0];
-  const t001Idx = tData.findIndex((r, i) => i > 0 && r[0] === 't-001');
-  if (t001Idx === -1) { Logger.log('t-001 not found'); return; }
+  const idx = tData.findIndex((r, i) => i > 0 && r[0] === 't-001');
+  if (idx === -1) { Logger.log('t-001 not found'); return; }
 
-  const row = tData[t001Idx];
+  const row = tData[idx];
   const transcriptUrl = row[tHeaders.indexOf('transcriptUrl')];
-  const summaryUrl = row[tHeaders.indexOf('summaryUrl')];
-  Logger.log('transcriptUrl: ' + transcriptUrl);
-  Logger.log('summaryUrl: ' + summaryUrl);
+  const summaryUrl    = row[tHeaders.indexOf('summaryUrl')];
+  const interviewDate = row[tHeaders.indexOf('interviewDate')];
+  const now = new Date().toISOString();
 
-  const transcriptText = readDriveFile_(transcriptUrl);
-  const summaryText = readDriveFile_(summaryUrl);
-  const sourceText = [summaryText, transcriptText].filter(Boolean).join('\n\n---\n\n');
-  Logger.log('Source text length: ' + sourceText.length);
+  const sourceText = [readDriveFile_(summaryUrl), readDriveFile_(transcriptUrl)]
+    .filter(Boolean).join('\n\n---\n\n');
+  if (!sourceText) { Logger.log('ERROR: could not read Drive files'); return; }
 
-  if (!sourceText) { Logger.log('ERROR: Could not read Drive files'); return; }
-
-  Logger.log('Calling classifyInterview...');
   const classification = classifyInterview(apiKey, sourceText, '');
-  Logger.log('Classification: ' + JSON.stringify(classification));
-
   const interviewType = classification.type || 'business';
-  let contactId;
-  let enriched;
+  Logger.log('Classified: ' + interviewType);
 
+  let contactId, enriched;
   if (interviewType === 'practitioner') {
     contactId = getNextPractitionerId();
-    enriched = enrichPractitioner(apiKey, sourceText);
+    enriched  = enrichPractitioner(apiKey, sourceText);
     handleUpsertRow('Practitioners', contactId, {
-      ...enriched,
-      status: 'enriched',
-      interviewDate: row[tHeaders.indexOf('interviewDate')],
-      transcriptUrl,
-      summaryUrl,
-      enrichedAt: new Date().toISOString(),
-      source: 'repair',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      ...enriched, status: 'enriched', interviewDate, transcriptUrl, summaryUrl,
+      enrichedAt: now, source: 'repair', createdAt: now, updatedAt: now,
     });
   } else {
     contactId = getNextBusinessId();
-    enriched = enrichBusiness(apiKey, sourceText);
+    enriched  = enrichBusiness(apiKey, sourceText);
     handleUpsertRow('Businesses', contactId, {
-      ...enriched,
-      status: 'enriched',
-      interviewDate: row[tHeaders.indexOf('interviewDate')],
-      transcriptUrl,
-      summaryUrl,
-      enrichedAt: new Date().toISOString(),
-      source: 'repair',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      ...enriched, status: 'enriched', interviewDate, transcriptUrl, summaryUrl,
+      enrichedAt: now, source: 'repair', createdAt: now, updatedAt: now,
     });
   }
 
   handleUpsertRow('Transcripts', 't-001', {
-    intervieweeName: enriched.name || classification.intervieweeName || '',
-    intervieweeBusinessName: enriched.company || classification.intervieweeBusinessName || '',
+    intervieweeName: enriched.name || '',
+    intervieweeBusinessName: enriched.company || '',
     linkedType: interviewType,
     linkedContactId: contactId,
     status: 'enriched',
     extractedData: JSON.stringify({ rawAnalysis: JSON.stringify(enriched) }),
-    processedAt: new Date().toISOString(),
+    processedAt: now,
   });
 
-  Logger.log('reclassifyT001 complete: ' + contactId);
+  Logger.log('reclassifyT001 complete → ' + contactId);
 }
 
 function repairBiz001() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const tSheet = ss.getSheetByName('Transcripts');
-  const tData = tSheet.getDataRange().getValues();
-  const tHeaders = tData[0];
-  const t001Idx = tData.findIndex((r, i) => i > 0 && r[0] === 't-001');
-  if (t001Idx === -1) { Logger.log('t-001 not found'); return; }
+  const tData  = tSheet.getDataRange().getValues();
+  const tHdrs  = tData[0];
+  const tIdx   = tData.findIndex((r, i) => i > 0 && r[0] === 't-001');
+  if (tIdx === -1) { Logger.log('t-001 not found'); return; }
 
-  const row = tData[t001Idx];
-  const extractedRaw = row[tHeaders.indexOf('extractedData')];
+  const extractedRaw = tData[tIdx][tHdrs.indexOf('extractedData')];
   if (!extractedRaw) { Logger.log('No extractedData on t-001'); return; }
 
-  const extractedData = JSON.parse(extractedRaw);
-  let rawAnalysis = extractedData.rawAnalysis || '';
-  // rawAnalysis may itself be a stringified JSON object OR a markdown-fenced string
-  rawAnalysis = stripCodeFences_(rawAnalysis);
+  const outer = JSON.parse(extractedRaw);
   let parsed;
   try {
-    parsed = JSON.parse(rawAnalysis);
-  } catch (e) {
-    // Try parsing as direct JSON if rawAnalysis was already a JSON string
-    try { parsed = JSON.parse(extractedData.rawAnalysis); } catch (e2) {
-      Logger.log('Could not parse rawAnalysis: ' + e2.message);
-      return;
+    parsed = JSON.parse(stripCodeFences_(outer.rawAnalysis));
+  } catch(e) {
+    try { parsed = JSON.parse(outer.rawAnalysis); } catch(e2) {
+      Logger.log('Cannot parse rawAnalysis: ' + e2.message); return;
     }
   }
 
-  Logger.log('Parsed enrichment data: ' + JSON.stringify(parsed));
-
   const bizSheet = ss.getSheetByName('Businesses');
-  const bizData = bizSheet.getDataRange().getValues();
-  const bizHeaders = bizData[0];
-  const bizRowIdx = bizData.findIndex((r, i) => i > 0 && r[0] === 'biz-001');
-  if (bizRowIdx === -1) { Logger.log('biz-001 not found'); return; }
+  const bizData  = bizSheet.getDataRange().getValues();
+  const bizHdrs  = bizData[0];
+  const bizIdx   = bizData.findIndex((r, i) => i > 0 && r[0] === 'biz-001');
+  if (bizIdx === -1) { Logger.log('biz-001 not found'); return; }
 
-  const fields = ['name','company','role','phone','email','industry','revenue',
-    'revenueMidpoint','employees','yearsInBusiness','location','currentAccounting',
-    'monthsBehind','currentSpend','painPoints','wtpSignals','leadScore',
-    'quotableLines','notes'];
-
-  fields.forEach(f => {
-    const col = bizHeaders.indexOf(f);
-    if (col === -1) return;
-    bizSheet.getRange(bizRowIdx + 1, col + 1).setValue(serializeCell_(parsed[f]));
+  ['name','company','role','phone','email','industry','revenue','revenueMidpoint',
+   'employees','yearsInBusiness','location','currentAccounting','monthsBehind',
+   'currentSpend','painPoints','wtpSignals','leadScore','quotableLines','notes'].forEach(f => {
+    const col = bizHdrs.indexOf(f);
+    if (col !== -1) bizSheet.getRange(bizIdx + 1, col + 1).setValue(serializeCell_(parsed[f]));
   });
+  bizSheet.getRange(bizIdx + 1, bizHdrs.indexOf('status') + 1).setValue('enriched');
+  bizSheet.getRange(bizIdx + 1, bizHdrs.indexOf('enrichedAt') + 1).setValue(new Date().toISOString());
 
-  const statusCol = bizHeaders.indexOf('status');
-  const enrichedAtCol = bizHeaders.indexOf('enrichedAt');
-  bizSheet.getRange(bizRowIdx + 1, statusCol + 1).setValue('enriched');
-  bizSheet.getRange(bizRowIdx + 1, enrichedAtCol + 1).setValue(new Date().toISOString());
-
-  tSheet.getRange(t001Idx + 1, tHeaders.indexOf('intervieweeName') + 1).setValue(parsed.name || '');
-  tSheet.getRange(t001Idx + 1, tHeaders.indexOf('intervieweeBusinessName') + 1).setValue(parsed.company || '');
-
+  tSheet.getRange(tIdx + 1, tHdrs.indexOf('intervieweeName') + 1).setValue(parsed.name || '');
+  tSheet.getRange(tIdx + 1, tHdrs.indexOf('intervieweeBusinessName') + 1).setValue(parsed.company || '');
   Logger.log('repairBiz001 complete');
 }

@@ -167,17 +167,15 @@ const BIZ_SCRIPT = {
   ]
 };
 
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz89C4C15E1Cxmux8bWUWw04pghxiGlqkfb2Ulr_8FMZdnIZ9vcNEakdrGo3zNLhAZV/exec';
+
 // Custom hook for API calls
-const useAPI = (sheetsUrl) => {
+const useAPI = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const call = useCallback(
     async (action, data = null) => {
-      if (!sheetsUrl) {
-        setError('Apps Script URL not configured. Go to Settings tab.');
-        return null;
-      }
 
       setLoading(true);
       setError(null);
@@ -185,7 +183,7 @@ const useAPI = (sheetsUrl) => {
       try {
         // Always use GET — POST→redirect loses the body on all browsers (302 converts POST to GET).
         // Pass data as a base64-encoded query param so Apps Script doGet can read it.
-        const url = new URL(sheetsUrl);
+        const url = new URL(APPS_SCRIPT_URL);
         url.searchParams.set('action', action);
         if (data && Object.keys(data).length > 0) {
           url.searchParams.set('d', btoa(unescape(encodeURIComponent(JSON.stringify(data)))));
@@ -205,7 +203,7 @@ const useAPI = (sheetsUrl) => {
         setLoading(false);
       }
     },
-    [sheetsUrl]
+    []
   );
 
   return { call, loading, error, setError };
@@ -742,8 +740,8 @@ function ScriptPage({ contacts, scriptType }) {
 }
 
 // ==================== THEMES PAGE ====================
-function ThemesPage({ businesses, practitioners, sheetsUrl }) {
-  const { call } = useAPI(sheetsUrl);
+function ThemesPage({ businesses, practitioners }) {
+  const { call } = useAPI();
   const [bizThemes, setBizThemes] = useState(null);
   const [pracThemes, setPracThemes] = useState(null);
   const [bizLoading, setBizLoading] = useState(false);
@@ -1086,19 +1084,14 @@ function App() {
   const [practitioners, setPractitioners] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [transcripts, setTranscripts] = useState([]);
-  const [sheetsUrl, setSheetsUrl] = useState(() => {
-    try { return localStorage.getItem('autopilot-sheets-url') || ''; } catch { return ''; }
-  });
-  const [apiKey, setApiKey] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
 
-  const { call, loading } = useAPI(sheetsUrl);
+  const { call, loading } = useAPI();
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
 
   useEffect(() => {
     const loadData = async () => {
-      if (!sheetsUrl) { setIsInitialized(true); return; }
       const data = await call('getData');
       if (data) {
         setPractitioners(data.practitioners || []);
@@ -1108,11 +1101,7 @@ function App() {
       setIsInitialized(true);
     };
     loadData();
-  }, [sheetsUrl]);
-
-  useEffect(() => {
-    if (sheetsUrl) localStorage.setItem('autopilot-sheets-url', sheetsUrl);
-  }, [sheetsUrl]);
+  }, []);
 
   const refreshData = async () => {
     const data = await call('getData');
@@ -1189,7 +1178,6 @@ function App() {
     { id: 'themes', label: '🧠 Themes' },
     { id: 'script-pro', label: '📝 PRO Script' },
     { id: 'script-biz', label: '📝 BIZ Script' },
-    { id: 'settings', label: '⚙ Settings' },
   ];
 
   const renderContent = () => {
@@ -1207,13 +1195,11 @@ function App() {
             onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
         );
       case 'themes':
-        return <ThemesPage businesses={businesses} practitioners={practitioners} sheetsUrl={sheetsUrl} />;
+        return <ThemesPage businesses={businesses} practitioners={practitioners} />;
       case 'script-pro':
         return <ScriptPage contacts={combinedContacts} scriptType="pro" />;
       case 'script-biz':
         return <ScriptPage contacts={combinedContacts} scriptType="biz" />;
-      case 'settings':
-        return <SettingsPage sheetsUrl={sheetsUrl} setSheetsUrl={setSheetsUrl} apiKey={apiKey} setApiKey={setApiKey} />;
       default:
         return null;
     }

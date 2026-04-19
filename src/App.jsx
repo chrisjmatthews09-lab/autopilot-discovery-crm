@@ -183,15 +183,14 @@ const useAPI = (sheetsUrl) => {
       setError(null);
 
       try {
-        let response;
-        if (action === 'getData' || action === 'getSettings') {
-          response = await fetch(`${sheetsUrl}?action=${action}`, { redirect: 'follow' });
-        } else {
-          const payload = { action, ...data };
-          const body = JSON.stringify(payload);
-          const headers = { 'Content-Type': 'text/plain' };
-          response = await fetch(sheetsUrl, { method: 'POST', headers, body, redirect: 'follow' });
+        // Always use GET — POST→redirect loses the body on all browsers (302 converts POST to GET).
+        // Pass data as a base64-encoded query param so Apps Script doGet can read it.
+        const url = new URL(sheetsUrl);
+        url.searchParams.set('action', action);
+        if (data && Object.keys(data).length > 0) {
+          url.searchParams.set('d', btoa(unescape(encodeURIComponent(JSON.stringify(data)))));
         }
+        const response = await fetch(url.toString(), { redirect: 'follow' });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const result = await response.json();

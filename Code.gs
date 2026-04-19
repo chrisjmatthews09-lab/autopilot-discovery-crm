@@ -405,11 +405,30 @@ leadScore: 1-10 integer. Leave fields blank if not found.`;
 
 function doGet(e) {
   const action = e && e.parameter && e.parameter.action;
-  if (action === 'getData')         return jsonResponse_(handleGetData());
-  if (action === 'getTranscripts')  return jsonResponse_(getSheetData_('Transcripts'));
-  if (action === 'getBusinesses')   return jsonResponse_(getSheetData_('Businesses'));
+
+  // Decode optional data payload (base64-encoded JSON from frontend)
+  let body = {};
+  if (e && e.parameter && e.parameter.d) {
+    try { body = JSON.parse(decodeURIComponent(escape(Utilities.base64Decode(e.parameter.d, Utilities.Charset.UTF_8).map(function(b){return String.fromCharCode(b);}).join('')))); } catch(ex) { Logger.log('doGet decode error: ' + ex); }
+  }
+
+  // Read-only actions
+  if (action === 'getData')          return jsonResponse_(handleGetData());
+  if (action === 'getTranscripts')   return jsonResponse_(getSheetData_('Transcripts'));
+  if (action === 'getBusinesses')    return jsonResponse_(getSheetData_('Businesses'));
   if (action === 'getPractitioners') return jsonResponse_(getSheetData_('Practitioners'));
-  if (action === 'getSettings')     return jsonResponse_({ status: 'ok' });
+  if (action === 'getSettings')      return jsonResponse_({ status: 'ok' });
+
+  // Mutation actions (routed here because POST→redirect loses the body cross-browser)
+  if (action === 'upsertPractitioner')  return jsonResponse_(handleUpsertContact_('Practitioners', body.data));
+  if (action === 'upsertBusiness')      return jsonResponse_(handleUpsertContact_('Businesses', body.data));
+  if (action === 'deletePractitioner')  return jsonResponse_({ deleted: handleDeleteRow_('Practitioners', body.id) });
+  if (action === 'deleteBusiness')      return jsonResponse_({ deleted: handleDeleteRow_('Businesses', body.id) });
+  if (action === 'deleteTranscript')    return jsonResponse_({ deleted: handleDeleteRow_('Transcripts', body.id) });
+  if (action === 'linkTranscript')      return jsonResponse_(handleLinkTranscript_(body));
+  if (action === 'enrichContact')       return jsonResponse_(handleEnrichTranscript(body.transcriptId));
+  if (action === 'analyzeThemes')       return jsonResponse_(handleAnalyzeThemes(body));
+
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Autopilot Discovery CRM')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

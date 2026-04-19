@@ -185,12 +185,8 @@ const useAPI = (sheetsUrl) => {
       try {
         let response;
         if (action === 'getData' || action === 'getSettings') {
-          // GET request
           response = await fetch(`${sheetsUrl}?action=${action}`);
         } else {
-          // POST request with text/plain to avoid CORS preflight.
-          // Google Apps Script redirects POST → GET on the first hop, losing the body.
-          // Fix: use redirect:'manual' to catch the redirect URL, then re-POST to it.
           const payload = { action, ...data };
           const body = JSON.stringify(payload);
           const headers = { 'Content-Type': 'text/plain' };
@@ -203,37 +199,20 @@ const useAPI = (sheetsUrl) => {
           });
 
           if (firstResponse.type === 'opaqueredirect') {
-            // Follow the redirect manually, re-POSTing the body
             const redirectUrl = firstResponse.headers.get('Location');
             if (redirectUrl) {
-              response = await fetch(redirectUrl, {
-                method: 'POST',
-                headers,
-                body,
-              });
+              response = await fetch(redirectUrl, { method: 'POST', headers, body });
             } else {
-              // No Location header — fall back to following redirect normally
-              response = await fetch(sheetsUrl, {
-                method: 'POST',
-                headers,
-                body,
-                redirect: 'follow',
-              });
+              response = await fetch(sheetsUrl, { method: 'POST', headers, body, redirect: 'follow' });
             }
           } else {
             response = firstResponse;
           }
         }
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const result = await response.json();
-        if (result.error) {
-          throw new Error(result.error);
-        }
-
+        if (result.error) throw new Error(result.error);
         return result;
       } catch (err) {
         const msg = err.message || 'API call failed';
@@ -250,45 +229,33 @@ const useAPI = (sheetsUrl) => {
   return { call, loading, error, setError };
 };
 
-// Hook to detect window width for responsive layout
 const useWindowWidth = () => {
-  const [width, setWidth] = useState(
-    typeof window !== 'undefined' ? window.innerWidth : 1024
-  );
-
+  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
   useEffect(() => {
     const handleResize = () => setWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
   return width;
 };
 
-// Settings Page Component
-function SettingsPage({ sheetsUrl, setSheetsUrl, apiKey, setApiKey, onTestConnection }) {
+// ==================== SETTINGS PAGE ====================
+function SettingsPage({ sheetsUrl, setSheetsUrl, apiKey, setApiKey }) {
   const [testLoading, setTestLoading] = useState(false);
   const [testStatus, setTestStatus] = useState(null);
 
   const handleTest = async () => {
     setTestLoading(true);
     setTestStatus(null);
-
     try {
       const response = await fetch(`${sheetsUrl}?action=getSettings`);
       if (response.ok) {
         setTestStatus({ success: true, msg: 'Connected to Apps Script!' });
       } else {
-        setTestStatus({
-          success: false,
-          msg: `HTTP ${response.status}. Check the URL.`,
-        });
+        setTestStatus({ success: false, msg: `HTTP ${response.status}. Check the URL.` });
       }
     } catch (err) {
-      setTestStatus({
-        success: false,
-        msg: `Connection failed: ${err.message}. Check CORS and URL.`,
-      });
+      setTestStatus({ success: false, msg: `Connection failed: ${err.message}` });
     } finally {
       setTestLoading(false);
     }
@@ -297,1267 +264,35 @@ function SettingsPage({ sheetsUrl, setSheetsUrl, apiKey, setApiKey, onTestConnec
   return (
     <div style={{ padding: '20px', maxWidth: '600px' }}>
       <h2 style={{ color: COLORS.text, marginBottom: '20px' }}>Settings</h2>
-
       <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
+        <label style={{ display: 'block', color: COLORS.textDim, fontSize: '14px', marginBottom: '8px' }}>
           Apps Script Web App URL
         </label>
-        <input
-          type="text"
-          value={sheetsUrl}
-          onChange={(e) => setSheetsUrl(e.target.value)}
-          placeholder="https://script.google.com/macros/d/..."
-          style={{
-            width: '100%',
-            padding: '10px',
-            backgroundColor: COLORS.card,
-            color: COLORS.text,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: '4px',
-            boxSizing: 'border-box',
-            marginBottom: '10px',
-          }}
-        />
+        <input type="text" value={sheetsUrl} onChange={(e) => setSheetsUrl(e.target.value)}
+          placeholder="https://script.google.com/macros/s/..."
+          style={{ width: '100%', padding: '10px', backgroundColor: COLORS.card, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: '4px', boxSizing: 'border-box', marginBottom: '10px' }} />
         <p style={{ color: COLORS.textDim, fontSize: '12px', margin: '0' }}>
-          Get this from Extensions → Apps Script → Deploy → New deployment
+          Get this from Extensions → Apps Script → Deploy → Manage deployments
         </p>
       </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
-          Anthropic API Key
-        </label>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-ant-..."
-          style={{
-            width: '100%',
-            padding: '10px',
-            backgroundColor: COLORS.card,
-            color: COLORS.text,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: '4px',
-            boxSizing: 'border-box',
-            marginBottom: '10px',
-          }}
-        />
-        <p style={{ color: COLORS.textDim, fontSize: '12px', margin: '0' }}>
-          This will be saved to your Google Sheet's Settings tab (server-side only)
-        </p>
-      </div>
-
-      <button
-        onClick={handleTest}
-        disabled={testLoading || !sheetsUrl}
-        style={{
-          padding: '10px 16px',
-          backgroundColor: testLoading ? COLORS.border : COLORS.accent,
-          color: '#fff',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: testLoading ? 'not-allowed' : 'pointer',
-          marginBottom: '10px',
-        }}
-      >
+      <button onClick={handleTest} disabled={testLoading || !sheetsUrl}
+        style={{ padding: '10px 16px', backgroundColor: testLoading ? COLORS.border : COLORS.accent, color: '#fff', border: 'none', borderRadius: '4px', cursor: testLoading ? 'not-allowed' : 'pointer', marginBottom: '10px' }}>
         {testLoading ? 'Testing...' : 'Test Connection'}
       </button>
-
       {testStatus && (
-        <div
-          style={{
-            padding: '10px',
-            backgroundColor: testStatus.success ? '#1b5e20' : '#b71c1c',
-            color: '#fff',
-            borderRadius: '4px',
-            marginBottom: '20px',
-            fontSize: '14px',
-          }}
-        >
+        <div style={{ padding: '10px', backgroundColor: testStatus.success ? '#1b5e20' : '#b71c1c', color: '#fff', borderRadius: '4px', marginBottom: '20px', fontSize: '14px' }}>
           {testStatus.msg}
         </div>
       )}
-
-      <div
-        style={{
-          backgroundColor: COLORS.card,
-          padding: '15px',
-          borderRadius: '4px',
-          color: COLORS.textDim,
-          fontSize: '13px',
-          lineHeight: '1.6',
-        }}
-      >
+      <div style={{ backgroundColor: COLORS.card, padding: '15px', borderRadius: '4px', color: COLORS.textDim, fontSize: '13px', lineHeight: '1.6' }}>
         <strong style={{ color: COLORS.text }}>Setup Instructions:</strong>
         <ol style={{ marginTop: '10px', paddingLeft: '20px' }}>
-          <li>Create a Google Sheet or open an existing one</li>
-          <li>Go to Extensions → Apps Script</li>
-          <li>Replace the default code with the provided Code.gs</li>
-          <li>
-            Click Deploy → New deployment → Web app → Execute as "Me" → Who has access
-            "Anyone"
-          </li>
-          <li>Copy the web app URL from the deployment modal</li>
-          <li>Paste it above and click Test Connection</li>
-          <li>The API key will be sent to Google Sheets when you save</li>
+          <li>Open your Google Sheet → Extensions → Apps Script</li>
+          <li>Replace all code with the provided Code.gs</li>
+          <li>Deploy → Manage deployments → Edit → New version → Save</li>
+          <li>Copy the web app URL and paste it above</li>
+          <li>Set <code>anthropicApiKey</code> in the Settings sheet tab</li>
         </ol>
-      </div>
-    </div>
-  );
-}
-
-// CRM Page Component
-function CRMPage({ contacts, onAdd, onEdit, onDelete, onExport, loading }) {
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    company: '',
-    role: '',
-    type: 'pro',
-    industry: '',
-    phone: '',
-    email: '',
-    status: 'new',
-    interviewDate: '',
-    notes: '',
-    source: '',
-  });
-  // 'idle' | 'saving' | 'success' | 'error'
-  const [saveStatus, setSaveStatus] = useState('idle');
-  const windowWidth = useWindowWidth();
-  const isMobile = windowWidth < 768;
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      company: '',
-      role: '',
-      type: 'pro',
-      industry: '',
-      phone: '',
-      email: '',
-      status: 'new',
-      interviewDate: '',
-      notes: '',
-      source: '',
-    });
-    setEditingId(null);
-    setShowForm(false);
-  };
-
-  const handleEdit = (contact) => {
-    setFormData(contact);
-    setEditingId(contact.id);
-    setShowForm(true);
-  };
-
-  const handleSave = async () => {
-    if (saveStatus === 'saving') return; // guard against double-click
-    if (!formData.name || !formData.company) {
-      alert('Name and company are required');
-      return;
-    }
-    setSaveStatus('saving');
-    const wasEditing = !!editingId;
-    const ok = await onAdd({
-      ...formData,
-      id: editingId || `contact-${Date.now()}`,
-      updatedAt: new Date().toISOString(),
-    });
-    if (ok) {
-      setSaveStatus('success');
-      // brief success flash, then reset the form + status
-      setTimeout(() => {
-        resetForm();
-        setSaveStatus('idle');
-      }, 1400);
-    } else {
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 2500);
-    }
-  };
-
-  const handleDelete = (id) => {
-    if (window.confirm('Delete this contact?')) {
-      onDelete(id);
-    }
-  };
-
-  if (isMobile) {
-    return (
-      <div style={{ padding: '16px', maxWidth: '100%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ color: COLORS.text, margin: '0' }}>Contacts</h2>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: COLORS.accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            {showForm ? 'Cancel' : '+ Add'}
-          </button>
-        </div>
-
-        {showForm && (
-          <div
-            style={{
-              backgroundColor: COLORS.card,
-              padding: '16px',
-              borderRadius: '4px',
-              marginBottom: '20px',
-            }}
-          >
-            <MobileContactForm
-              formData={formData}
-              setFormData={setFormData}
-              onSave={handleSave}
-              onCancel={resetForm}
-              isEditing={!!editingId}
-              saveStatus={saveStatus}
-            />
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
-          <button
-            onClick={onExport}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: COLORS.accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
-          >
-            Export CSV
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {contacts.map((contact) => (
-            <MobileContactCard
-              key={contact.id}
-              contact={contact}
-              onEdit={() => handleEdit(contact)}
-              onDelete={() => handleDelete(contact.id)}
-            />
-          ))}
-        </div>
-
-        {loading && (
-          <div style={{ textAlign: 'center', padding: '20px', color: COLORS.textDim }}>
-            Loading...
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Desktop layout
-  return (
-    <div style={{ padding: '20px' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '20px',
-        }}
-      >
-        <h2 style={{ color: COLORS.text, margin: '0' }}>Contacts ({contacts.length})</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            onClick={onExport}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: COLORS.accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: COLORS.accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            {showForm ? 'Cancel' : '+ Add Contact'}
-          </button>
-        </div>
-      </div>
-
-      {showForm && (
-        <div
-          style={{
-            backgroundColor: COLORS.card,
-            padding: '20px',
-            borderRadius: '8px',
-            marginBottom: '20px',
-          }}
-        >
-          <h3 style={{ color: COLORS.text, marginTop: '0' }}>
-            {editingId ? 'Edit Contact' : 'New Contact'}
-          </h3>
-          <DesktopContactForm
-            formData={formData}
-            setFormData={setFormData}
-            onSave={handleSave}
-            onCancel={resetForm}
-            saveStatus={saveStatus}
-            isEditing={!!editingId}
-          />
-        </div>
-      )}
-
-      {contacts.length === 0 ? (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '40px',
-            color: COLORS.textDim,
-          }}
-        >
-          No contacts yet. Add one to get started!
-        </div>
-      ) : (
-        <div
-          style={{
-            overflowX: 'auto',
-            backgroundColor: COLORS.card,
-            borderRadius: '8px',
-            border: `1px solid ${COLORS.border}`,
-          }}
-        >
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: '14px',
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                <th
-                  style={{
-                    padding: '12px',
-                    textAlign: 'left',
-                    color: COLORS.textDim,
-                    fontWeight: '600',
-                  }}
-                >
-                  Name
-                </th>
-                <th
-                  style={{
-                    padding: '12px',
-                    textAlign: 'left',
-                    color: COLORS.textDim,
-                    fontWeight: '600',
-                  }}
-                >
-                  Company
-                </th>
-                <th
-                  style={{
-                    padding: '12px',
-                    textAlign: 'left',
-                    color: COLORS.textDim,
-                    fontWeight: '600',
-                  }}
-                >
-                  Role
-                </th>
-                <th
-                  style={{
-                    padding: '12px',
-                    textAlign: 'left',
-                    color: COLORS.textDim,
-                    fontWeight: '600',
-                  }}
-                >
-                  Type
-                </th>
-                <th
-                  style={{
-                    padding: '12px',
-                    textAlign: 'left',
-                    color: COLORS.textDim,
-                    fontWeight: '600',
-                  }}
-                >
-                  Status
-                </th>
-                <th
-                  style={{
-                    padding: '12px',
-                    textAlign: 'center',
-                    color: COLORS.textDim,
-                    fontWeight: '600',
-                  }}
-                >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {contacts.map((contact) => (
-                <tr
-                  key={contact.id}
-                  style={{ borderBottom: `1px solid ${COLORS.border}` }}
-                >
-                  <td style={{ padding: '12px', color: COLORS.text }}>
-                    {contact.name}
-                  </td>
-                  <td style={{ padding: '12px', color: COLORS.text }}>
-                    {contact.company}
-                  </td>
-                  <td style={{ padding: '12px', color: COLORS.text }}>
-                    {contact.role}
-                  </td>
-                  <td style={{ padding: '12px', color: COLORS.text }}>
-                    <span
-                      style={{
-                        padding: '4px 8px',
-                        backgroundColor:
-                          contact.type === 'pro' ? COLORS.accent : COLORS.warning,
-                        color: '#fff',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                      }}
-                    >
-                      {contact.type}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px', color: COLORS.text }}>
-                    <span
-                      style={{
-                        padding: '4px 8px',
-                        backgroundColor:
-                          contact.status === 'hired' ? COLORS.success : COLORS.warning,
-                        color: '#fff',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                      }}
-                    >
-                      {contact.status}
-                    </span>
-                  </td>
-                  <td
-                    style={{
-                      padding: '12px',
-                      textAlign: 'center',
-                      display: 'flex',
-                      gap: '8px',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <button
-                      onClick={() => handleEdit(contact)}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: COLORS.border,
-                        color: COLORS.text,
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(contact.id)}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: COLORS.danger,
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '20px', color: COLORS.textDim }}>
-          Loading...
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DesktopContactForm({ formData, setFormData, onSave, onCancel, saveStatus = 'idle', isEditing = false }) {
-  const isSaving = saveStatus === 'saving';
-  const isSuccess = saveStatus === 'success';
-  const isError = saveStatus === 'error';
-  const btnBg = isSuccess ? COLORS.success : isError ? COLORS.danger : COLORS.success;
-  const btnLabel = isSaving
-    ? (isEditing ? 'Updating…' : 'Saving…')
-    : isSuccess
-    ? (isEditing ? '✓ Contact Updated!' : '✓ Contact Created!')
-    : isError
-    ? '✗ Save Failed — Retry'
-    : 'Save';
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-      <input
-        type="text"
-        placeholder="Name *"
-        value={formData.name}
-        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="text"
-        placeholder="Company *"
-        value={formData.company}
-        onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="text"
-        placeholder="Role"
-        value={formData.role}
-        onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-        style={inputStyle}
-      />
-      <select
-        value={formData.type}
-        onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-        style={inputStyle}
-      >
-        <option value="pro">Pro</option>
-        <option value="biz">Business</option>
-      </select>
-      <input
-        type="text"
-        placeholder="Industry"
-        value={formData.industry}
-        onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="tel"
-        placeholder="Phone"
-        value={formData.phone}
-        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="email"
-        placeholder="Email"
-        value={formData.email}
-        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-        style={inputStyle}
-      />
-      <select
-        value={formData.status}
-        onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-        style={inputStyle}
-      >
-        <option value="new">New</option>
-        <option value="contacted">Contacted</option>
-        <option value="interested">Interested</option>
-        <option value="hired">Hired</option>
-        <option value="declined">Declined</option>
-      </select>
-      <input
-        type="date"
-        value={formData.interviewDate}
-        onChange={(e) => setFormData({ ...formData, interviewDate: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="text"
-        placeholder="Source"
-        value={formData.source}
-        onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-        style={inputStyle}
-      />
-      <textarea
-        placeholder="Notes"
-        value={formData.notes}
-        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-        style={{ ...inputStyle, gridColumn: '1 / -1', minHeight: '100px' }}
-      />
-      <div
-        style={{
-          gridColumn: '1 / -1',
-          display: 'flex',
-          gap: '10px',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <button
-          onClick={onCancel}
-          style={{
-            padding: '10px 16px',
-            backgroundColor: COLORS.border,
-            color: COLORS.text,
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onSave}
-          disabled={isSaving || isSuccess}
-          style={{
-            padding: '10px 16px',
-            minWidth: 170,
-            backgroundColor: btnBg,
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer',
-            opacity: isSaving && !isSuccess ? 0.85 : 1,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            transition: 'background-color 0.25s ease',
-            fontWeight: 600,
-          }}
-        >
-          {isSaving && (
-            <span
-              style={{
-                display: 'inline-block',
-                width: 14,
-                height: 14,
-                border: '2px solid rgba(255,255,255,0.4)',
-                borderTopColor: '#fff',
-                borderRadius: '50%',
-                animation: 'autopilot-spin 0.7s linear infinite',
-              }}
-            />
-          )}
-          {btnLabel}
-        </button>
-        <style>{`@keyframes autopilot-spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    </div>
-  );
-}
-
-function MobileContactForm({ formData, setFormData, onSave, onCancel, isEditing, saveStatus = 'idle' }) {
-  const isSaving = saveStatus === 'saving';
-  const isSuccess = saveStatus === 'success';
-  const isError = saveStatus === 'error';
-  const btnBg = isSuccess ? COLORS.success : isError ? COLORS.danger : COLORS.success;
-  const btnLabel = isSaving
-    ? (isEditing ? 'Updating…' : 'Saving…')
-    : isSuccess
-    ? (isEditing ? '✓ Updated!' : '✓ Created!')
-    : isError
-    ? '✗ Retry'
-    : (isEditing ? 'Update' : 'Add');
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <input
-        type="text"
-        placeholder="Name *"
-        value={formData.name}
-        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="text"
-        placeholder="Company *"
-        value={formData.company}
-        onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="text"
-        placeholder="Role"
-        value={formData.role}
-        onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-        style={inputStyle}
-      />
-      <select
-        value={formData.type}
-        onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-        style={inputStyle}
-      >
-        <option value="pro">Pro</option>
-        <option value="biz">Business</option>
-      </select>
-      <input
-        type="text"
-        placeholder="Industry"
-        value={formData.industry}
-        onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="tel"
-        placeholder="Phone"
-        value={formData.phone}
-        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="email"
-        placeholder="Email"
-        value={formData.email}
-        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-        style={inputStyle}
-      />
-      <select
-        value={formData.status}
-        onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-        style={inputStyle}
-      >
-        <option value="new">New</option>
-        <option value="contacted">Contacted</option>
-        <option value="interested">Interested</option>
-        <option value="hired">Hired</option>
-        <option value="declined">Declined</option>
-      </select>
-      <input
-        type="date"
-        value={formData.interviewDate}
-        onChange={(e) => setFormData({ ...formData, interviewDate: e.target.value })}
-        style={inputStyle}
-      />
-      <input
-        type="text"
-        placeholder="Source"
-        value={formData.source}
-        onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-        style={inputStyle}
-      />
-      <textarea
-        placeholder="Notes"
-        value={formData.notes}
-        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-        style={{ ...inputStyle, minHeight: '80px' }}
-      />
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button
-          onClick={onCancel}
-          style={{
-            flex: 1,
-            padding: '10px',
-            backgroundColor: COLORS.border,
-            color: COLORS.text,
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onSave}
-          disabled={isSaving || isSuccess}
-          style={{
-            flex: 1,
-            padding: '10px',
-            backgroundColor: btnBg,
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer',
-            opacity: isSaving && !isSuccess ? 0.85 : 1,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            transition: 'background-color 0.25s ease',
-            fontWeight: 600,
-          }}
-        >
-          {isSaving && (
-            <span
-              style={{
-                display: 'inline-block',
-                width: 12,
-                height: 12,
-                border: '2px solid rgba(255,255,255,0.4)',
-                borderTopColor: '#fff',
-                borderRadius: '50%',
-                animation: 'autopilot-spin 0.7s linear infinite',
-              }}
-            />
-          )}
-          {btnLabel}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function MobileContactCard({ contact, onEdit, onDelete }) {
-  return (
-    <div
-      style={{
-        backgroundColor: COLORS.card,
-        padding: '12px',
-        borderRadius: '4px',
-        border: `1px solid ${COLORS.border}`,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          marginBottom: '8px',
-        }}
-      >
-        <div>
-          <div style={{ color: COLORS.text, fontWeight: '600', marginBottom: '4px' }}>
-            {contact.name}
-          </div>
-          <div style={{ color: COLORS.textDim, fontSize: '13px' }}>
-            {contact.company}
-          </div>
-        </div>
-        <span
-          style={{
-            padding: '4px 8px',
-            backgroundColor: contact.status === 'hired' ? COLORS.success : COLORS.warning,
-            color: '#fff',
-            borderRadius: '4px',
-            fontSize: '11px',
-          }}
-        >
-          {contact.status}
-        </span>
-      </div>
-
-      {contact.role && (
-        <div style={{ color: COLORS.textDim, fontSize: '12px', marginBottom: '4px' }}>
-          {contact.role}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-        <button
-          onClick={onEdit}
-          style={{
-            flex: 1,
-            padding: '8px',
-            backgroundColor: COLORS.accent,
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
-        >
-          Edit
-        </button>
-        <button
-          onClick={onDelete}
-          style={{
-            flex: 1,
-            padding: '8px',
-            backgroundColor: COLORS.danger,
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Analysis Page Component
-function AnalysisPage({ contacts, sheetsUrl, onAnalysisComplete }) {
-  const { call, loading, error, setError } = useAPI(sheetsUrl);
-  const [selectedContactId, setSelectedContactId] = useState('');
-  const [scriptType, setScriptType] = useState('pro');
-  const [transcript, setTranscript] = useState('');
-  const [intervieweeName, setIntervieweeName] = useState('');
-  const [result, setResult] = useState(null);
-
-  const handleAnalyze = async () => {
-    if (!selectedContactId || !transcript.trim()) {
-      setError('Please select a contact and enter a transcript');
-      return;
-    }
-
-    const result = await call('analyzeTranscript', {
-      transcript,
-      interviewType: scriptType,
-      intervieweeName: intervieweeName || 'Unknown',
-    });
-
-    if (result) {
-      setResult(result);
-      // Save the analysis
-      await call('saveAnalysis', {
-        data: {
-          id: `analysis-${Date.now()}`,
-          contactId: selectedContactId,
-          intervieweeName: intervieweeName || 'Unknown',
-          type: scriptType,
-          analyzedAt: new Date().toISOString(),
-          overallSentiment: result.overallSentiment || '',
-          leadScore: result.leadScore || result.relevanceScore || 0,
-          fullJSON: JSON.stringify(result),
-        },
-      });
-      setTranscript('');
-      setResult(null);
-      alert('Analysis saved!');
-      if (onAnalysisComplete) onAnalysisComplete();
-    }
-  };
-
-  const windowWidth = useWindowWidth();
-  const isMobile = windowWidth < 768;
-
-  return (
-    <div style={{ padding: isMobile ? '16px' : '20px', maxWidth: isMobile ? '100%' : '800px' }}>
-      <h2 style={{ color: COLORS.text, marginBottom: '20px' }}>Analyze Transcript</h2>
-
-      {error && (
-        <div
-          style={{
-            padding: '12px',
-            backgroundColor: COLORS.danger,
-            color: '#fff',
-            borderRadius: '4px',
-            marginBottom: '16px',
-            fontSize: '14px',
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
-          Select Contact
-        </label>
-        <select
-          value={selectedContactId}
-          onChange={(e) => setSelectedContactId(e.target.value)}
-          style={inputStyle}
-        >
-          <option value="">-- Choose a contact --</option>
-          {contacts.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.company})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
-          Interviewee Name
-        </label>
-        <input
-          type="text"
-          value={intervieweeName}
-          onChange={(e) => setIntervieweeName(e.target.value)}
-          placeholder="Optional"
-          style={inputStyle}
-        />
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
-          Interview Type
-        </label>
-        <select
-          value={scriptType}
-          onChange={(e) => setScriptType(e.target.value)}
-          style={inputStyle}
-        >
-          <option value="pro">Professional (PRO Script)</option>
-          <option value="biz">Business (BIZ Script)</option>
-        </select>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
-          Transcript *
-        </label>
-        <textarea
-          value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
-          placeholder="Paste the interview transcript here..."
-          style={{
-            ...inputStyle,
-            minHeight: isMobile ? '200px' : '300px',
-          }}
-        />
-      </div>
-
-      <button
-        onClick={handleAnalyze}
-        disabled={loading}
-        style={{
-          padding: '10px 16px',
-          backgroundColor: loading ? COLORS.border : COLORS.accent,
-          color: '#fff',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: loading ? 'not-allowed' : 'pointer',
-          width: isMobile ? '100%' : 'auto',
-        }}
-      >
-        {loading ? 'Analyzing...' : 'Analyze with Claude'}
-      </button>
-
-      {result && (
-        <div
-          style={{
-            marginTop: '20px',
-            padding: '16px',
-            backgroundColor: COLORS.card,
-            borderRadius: '4px',
-            border: `1px solid ${COLORS.border}`,
-          }}
-        >
-          <h3 style={{ color: COLORS.text, marginTop: '0' }}>Analysis Result</h3>
-          <pre
-            style={{
-              color: COLORS.textDim,
-              fontSize: '12px',
-              overflowX: 'auto',
-              padding: '12px',
-              backgroundColor: COLORS.bg,
-              borderRadius: '4px',
-            }}
-          >
-            {JSON.stringify(result, null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Script Page Component
-function ScriptPage({ contacts, scriptType }) {
-  const script = scriptType === 'pro' ? PRO_SCRIPT : BIZ_SCRIPT;
-  const [selectedContactId, setSelectedContactId] = useState('');
-  const [checkedQs, setCheckedQs] = useState(() => {
-    try {
-      const saved = localStorage.getItem('autopilot-checklist');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-  const windowWidth = useWindowWidth();
-  const isMobile = windowWidth < 768;
-
-  const toggleCheck = (key) => {
-    const newChecked = { ...checkedQs, [key]: !checkedQs[key] };
-    setCheckedQs(newChecked);
-    localStorage.setItem('autopilot-checklist', JSON.stringify(newChecked));
-  };
-
-  const clearProgress = () => {
-    if (window.confirm('Clear all checklist progress?')) {
-      setCheckedQs({});
-      localStorage.removeItem('autopilot-checklist');
-    }
-  };
-
-  return (
-    <div style={{ padding: isMobile ? '16px' : '20px', maxWidth: isMobile ? '100%' : '900px' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '20px',
-          flexDirection: isMobile ? 'column' : 'row',
-          gap: isMobile ? '12px' : '0',
-        }}
-      >
-        <h2 style={{ color: COLORS.text, margin: '0' }}>
-          {scriptType === 'pro' ? 'Professional' : 'Business'} Script
-        </h2>
-        <button
-          onClick={clearProgress}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: COLORS.danger,
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
-        >
-          Clear Progress
-        </button>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label
-          style={{
-            display: 'block',
-            color: COLORS.textDim,
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
-        >
-          Current Contact (for reference)
-        </label>
-        <select
-          value={selectedContactId}
-          onChange={(e) => setSelectedContactId(e.target.value)}
-          style={inputStyle}
-        >
-          <option value="">-- No contact selected --</option>
-          {contacts.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.company})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div
-        style={{
-          backgroundColor: COLORS.card,
-          padding: isMobile ? '12px' : '20px',
-          borderRadius: '4px',
-          border: `1px solid ${COLORS.border}`,
-        }}
-      >
-                {script.sections.map((section, sectionIdx) => (
-          <div key={sectionIdx} style={{ marginBottom: '28px' }}>
-            <h3 style={{
-              color: section.color,
-              fontWeight: '700',
-              marginBottom: '12px',
-              fontSize: '17px'
-            }}>
-              {section.name}
-            </h3>
-            {section.questions.map((question, qIdx) => {
-              const key = `${scriptType}-${sectionIdx}-${qIdx}`;
-              const isChecked = checkedQs[key];
-              return (
-                <label
-                  key={qIdx}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '10px',
-                    cursor: 'pointer',
-                    color: COLORS.text,
-                    fontSize: '15px',
-                    lineHeight: '1.6',
-                    marginBottom: '12px',
-                    padding: '10px',
-                    backgroundColor: isChecked ? COLORS.bg : 'transparent',
-                    borderRadius: '4px',
-                    textDecoration: isChecked ? 'line-through' : 'none',
-                    opacity: isChecked ? 0.6 : 1,
-                    border: `1px solid ${COLORS.border}`
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => toggleCheck(key)}
-                    style={{
-                      marginTop: '4px',
-                      cursor: 'pointer',
-                      accentColor: COLORS.accent,
-                    }}
-                  />
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{question.q}</div>
-                    <div style={{ fontSize: '13px', color: COLORS.textDim, marginTop: '4px' }}>
-                      {question.why}
-                    </div>
-                  </div>
-                </label>
-              );
-            })}
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -1574,7 +309,6 @@ const inputStyle = {
   fontSize: '14px',
 };
 
-// Main App Component
 // ==================== V2 SCHEMA CONFIG ====================
 const V2_SCHEMA = {
   practitioner: {
@@ -1583,28 +317,25 @@ const V2_SCHEMA = {
     icon: '👥',
     idPrefix: 'prac',
     nameField: 'name',
-    orgField: 'firmName',
+    orgField: 'company',
     orgLabel: 'Firm Name',
     coreFields: [
       { key: 'name', label: 'Full Name', required: true },
-      { key: 'firmName', label: 'Firm Name', required: true },
+      { key: 'company', label: 'Firm Name', required: true },
       { key: 'role', label: 'Role' },
       { key: 'email', label: 'Email', type: 'email' },
       { key: 'phone', label: 'Phone', type: 'tel' },
       { key: 'location', label: 'Location (City, State)' },
     ],
     firmFields: [
-      { key: 'firmType', label: 'Firm Type', type: 'select',
-        options: ['', 'tax', 'bookkeeping', 'tax+bk', 'cas', 'cfo-advisory', 'full-service'] },
-      { key: 'firmSize', label: 'Firm Size', type: 'select',
-        options: ['', 'solo', '2-5', '6-20', '20+'] },
+      { key: 'industry', label: 'Industry' },
+      { key: 'firmSize', label: 'Firm Size' },
       { key: 'clientCount', label: 'Client Count' },
-      { key: 'revenueEstimate', label: 'Firm Revenue (range)' },
-      { key: 'yearsInBusiness', label: 'Years in Business' },
-      { key: 'aiSentiment', label: 'AI Sentiment', type: 'select',
-        options: ['', 'positive', 'neutral', 'negative'] },
+      { key: 'avgClientRevenue', label: 'Avg Client Revenue' },
+      { key: 'yearsInPractice', label: 'Years in Practice' },
+      { key: 'leadScore', label: 'Lead Score (1-10)' },
     ],
-    richFields: ['specialties', 'techStack', 'painPoints', 'acquisitionSignals'],
+    richFields: ['softwareStack', 'painPoints', 'wtpSignals', 'quotableLines'],
     statusOptions: ['new', 'contacted', 'interested', 'declined'],
   },
   business: {
@@ -1638,7 +369,7 @@ const V2_SCHEMA = {
   },
 };
 
-// ==================== V2 CONTACT PAGE (shared by practitioners + businesses) ====================
+// ==================== V2 CONTACT PAGE ====================
 function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading }) {
   const cfg = V2_SCHEMA[kind];
   const [showForm, setShowForm] = useState(false);
@@ -1653,47 +384,22 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
   const filtered = rows.filter((r) => {
     if (!filter) return true;
     const q = filter.toLowerCase();
-    return [r.name, r.firmName, r.company, r.industry, r.location, r.firmType]
+    return [r.name, r.company, r.industry, r.location]
       .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
   });
 
-  const openNew = () => {
-    setFormData({ status: 'new' });
-    setEditingId(null);
-    setShowForm(true);
-  };
-  const openEdit = (row) => {
-    setFormData(row);
-    setEditingId(row.id);
-    setShowForm(true);
-  };
-  const resetForm = () => {
-    setFormData(emptyForm);
-    setEditingId(null);
-    setShowForm(false);
-  };
+  const openNew = () => { setFormData({ status: 'new' }); setEditingId(null); setShowForm(true); };
+  const openEdit = (row) => { setFormData(row); setEditingId(row.id); setShowForm(true); };
+  const resetForm = () => { setFormData(emptyForm); setEditingId(null); setShowForm(false); };
 
   const handleSave = async () => {
     if (saveStatus === 'saving') return;
-    const missing = cfg.coreFields
-      .filter((f) => f.required && !formData[f.key])
-      .map((f) => f.label);
-    if (missing.length) {
-      alert('Required: ' + missing.join(', '));
-      return;
-    }
+    const missing = cfg.coreFields.filter((f) => f.required && !formData[f.key]).map((f) => f.label);
+    if (missing.length) { alert('Required: ' + missing.join(', ')); return; }
     setSaveStatus('saving');
-    const ok = await onUpsert({
-      ...formData,
-      id: editingId || `${cfg.idPrefix}-${Date.now()}`,
-    });
-    if (ok) {
-      setSaveStatus('success');
-      setTimeout(() => { resetForm(); setSaveStatus('idle'); }, 1200);
-    } else {
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 2500);
-    }
+    const ok = await onUpsert({ ...formData, id: editingId || `${cfg.idPrefix}-${Date.now()}` });
+    if (ok) { setSaveStatus('success'); setTimeout(() => { resetForm(); setSaveStatus('idle'); }, 1200); }
+    else { setSaveStatus('error'); setTimeout(() => setSaveStatus('idle'), 2500); }
   };
 
   if (detailRow) {
@@ -1704,12 +410,7 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
         transcripts={transcripts.filter((t) => t.linkedContactId === detailRow.id)}
         onClose={() => setDetailId(null)}
         onEdit={() => { setDetailId(null); openEdit(detailRow); }}
-        onDelete={async () => {
-          if (window.confirm(`Delete ${detailRow.name}?`)) {
-            await onDelete(detailRow.id);
-            setDetailId(null);
-          }
-        }}
+        onDelete={async () => { if (window.confirm(`Delete ${detailRow.name}?`)) { await onDelete(detailRow.id); setDetailId(null); } }}
         onEnrich={(transcriptId) => onEnrich(kind, detailRow.id, transcriptId)}
       />
     );
@@ -1722,17 +423,10 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
           {cfg.icon} {cfg.label} <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({rows.length})</span>
         </h2>
         <div style={{ display: 'flex', gap: 10 }}>
-          <input
-            type="text"
-            placeholder={`Search ${cfg.label.toLowerCase()}…`}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }}
-          />
-          <button
-            onClick={() => (showForm ? resetForm() : openNew())}
-            style={{ padding: '8px 16px', backgroundColor: showForm ? COLORS.border : COLORS.primary, color: showForm ? COLORS.text : '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
-          >
+          <input type="text" placeholder={`Search ${cfg.label.toLowerCase()}…`} value={filter} onChange={(e) => setFilter(e.target.value)}
+            style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }} />
+          <button onClick={() => (showForm ? resetForm() : openNew())}
+            style={{ padding: '8px 16px', backgroundColor: showForm ? COLORS.border : COLORS.primary, color: showForm ? COLORS.text : '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
             {showForm ? 'Cancel' : `+ Add ${cfg.singular}`}
           </button>
         </div>
@@ -1740,9 +434,7 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
 
       {showForm && (
         <div style={{ backgroundColor: COLORS.card, padding: 20, borderRadius: 8, marginBottom: 20, border: `1px solid ${COLORS.border}` }}>
-          <h3 style={{ marginTop: 0, color: COLORS.text }}>
-            {editingId ? `Edit ${cfg.singular}` : `New ${cfg.singular}`}
-          </h3>
+          <h3 style={{ marginTop: 0, color: COLORS.text }}>{editingId ? `Edit ${cfg.singular}` : `New ${cfg.singular}`}</h3>
           <V2Form cfg={cfg} formData={formData} setFormData={setFormData} onSave={handleSave} onCancel={resetForm} saveStatus={saveStatus} isEditing={!!editingId} />
         </div>
       )}
@@ -1750,31 +442,26 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
       {filtered.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
           {rows.length === 0
-            ? `No ${cfg.label.toLowerCase()} yet. Click "+ Add ${cfg.singular}" to create one, or import from the Inbox.`
+            ? `No ${cfg.label.toLowerCase()} yet. They appear automatically after Zapier sends an interview.`
             : `No ${cfg.label.toLowerCase()} match "${filter}".`}
         </div>
       ) : (
         <div style={{ backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: kind === 'practitioner' ? '1.3fr 1.6fr 1fr 0.9fr 0.9fr 0.8fr' : '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
-            <div>Name</div>
-            <div>{cfg.orgLabel}</div>
-            <div>{kind === 'practitioner' ? 'Firm Type' : 'Industry'}</div>
-            <div>{kind === 'practitioner' ? 'Size' : 'Revenue'}</div>
-            <div>Status</div>
-            <div style={{ textAlign: 'right' }}>Actions</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
+            <div>Name</div><div>{cfg.orgLabel}</div><div>Industry</div><div>Revenue / Size</div><div>Status</div><div style={{ textAlign: 'right' }}>Actions</div>
           </div>
           {filtered.map((r) => (
-            <div key={r.id} onClick={() => setDetailId(r.id)} style={{ display: 'grid', gridTemplateColumns: kind === 'practitioner' ? '1.3fr 1.6fr 1fr 0.9fr 0.9fr 0.8fr' : '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center', transition: 'background-color 0.15s' }}
+            <div key={r.id} onClick={() => setDetailId(r.id)}
+              style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-            >
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
               <div style={{ fontWeight: 600, color: COLORS.text }}>
                 {r.name || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(no name)</span>}
                 {r.enrichedAt && <span style={{ marginLeft: 6, fontSize: 10, color: COLORS.success }}>✨</span>}
               </div>
               <div style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</div>
-              <div style={{ color: COLORS.textMuted }}>{kind === 'practitioner' ? r.firmType : r.industry || '—'}</div>
-              <div style={{ color: COLORS.textMuted }}>{kind === 'practitioner' ? r.firmSize : r.revenue || '—'}</div>
+              <div style={{ color: COLORS.textMuted }}>{r.industry || '—'}</div>
+              <div style={{ color: COLORS.textMuted }}>{kind === 'practitioner' ? (r.firmSize || '—') : (r.revenue || '—')}</div>
               <div><StatusPill status={r.status} /></div>
               <div style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                 <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
@@ -1784,7 +471,6 @@ function V2ContactPage({ kind, rows, transcripts, onUpsert, onDelete, onLinkTran
           ))}
         </div>
       )}
-
       {loading && <div style={{ textAlign: 'center', padding: 16, color: COLORS.textDim }}>Loading…</div>}
     </div>
   );
@@ -1800,10 +486,10 @@ function StatusPill({ status }) {
     interested: { bg: '#E8F5EE', fg: '#1A5C3A' },
     hired: { bg: '#F3EFFE', fg: '#6B4FA0' },
     declined: { bg: '#FCE8E8', fg: '#DC2626' },
-    new_needs_enrichment: { bg: '#FFF0EB', fg: '#C4552D' },
+    enriched: { bg: '#E8F5EE', fg: '#1A5C3A' },
   };
   const c = colors[s] || colors.new;
-  return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, backgroundColor: c.bg, color: c.fg, textTransform: 'capitalize' }}>{s.replace(/_/g, ' ')}</span>;
+  return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, backgroundColor: c.bg, color: c.fg, textTransform: 'capitalize' }}>{s}</span>;
 }
 
 function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEditing }) {
@@ -1812,7 +498,6 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
   const isError = saveStatus === 'error';
   const btnLabel = isSaving ? 'Saving…' : isSuccess ? `✓ ${cfg.singular} ${isEditing ? 'Updated' : 'Created'}!` : isError ? '✗ Retry' : 'Save';
   const allFields = [...cfg.coreFields, ...cfg.firmFields];
-
   const updateField = (k, v) => setFormData((p) => ({ ...p, [k]: v }));
 
   return (
@@ -1849,8 +534,9 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
         <button onClick={onCancel} style={{ padding: '10px 16px', backgroundColor: COLORS.border, color: COLORS.text, border: 'none', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
-        <button onClick={onSave} disabled={isSaving || isSuccess} style={{ padding: '10px 18px', minWidth: 160, backgroundColor: isError ? COLORS.danger : COLORS.success, color: '#fff', border: 'none', borderRadius: 6, cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          {isSaving && (<span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'autopilot-spin 0.7s linear infinite' }} />)}
+        <button onClick={onSave} disabled={isSaving || isSuccess}
+          style={{ padding: '10px 18px', minWidth: 160, backgroundColor: isError ? COLORS.danger : COLORS.success, color: '#fff', border: 'none', borderRadius: 6, cursor: isSaving || isSuccess ? 'not-allowed' : 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          {isSaving && <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'autopilot-spin 0.7s linear infinite' }} />}
           {btnLabel}
         </button>
       </div>
@@ -1868,17 +554,15 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
 
   const pains = parse(row.painPoints);
   const wtp = parse(row.wtpSignals);
-  const acqSignals = parse(row.acquisitionSignals);
   const quotes = parse(row.quotableLines);
-  const specialties = parse(row.specialties);
-  const techStack = parse(row.techStack);
+  const softwareStack = parse(row.softwareStack);
 
   const runEnrich = async (transcriptId) => {
     setEnrichError(null);
     setEnrichingId(transcriptId);
     const ok = await onEnrich(transcriptId);
     setEnrichingId(null);
-    if (!ok) setEnrichError('Enrichment failed — check API key in Settings and that the Drive file is readable.');
+    if (!ok) setEnrichError('Enrichment failed — check Settings API key and Drive permissions.');
   };
 
   return (
@@ -1906,7 +590,6 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
           </div>
         </div>
 
-        {/* Top tiles */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
           {kind === 'business' ? (
             <>
@@ -1918,17 +601,15 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
             </>
           ) : (
             <>
-              <Tile label="Firm Type" value={row.firmType} />
-              <Tile label="Size" value={row.firmSize} />
+              <Tile label="Firm Size" value={row.firmSize} />
               <Tile label="Clients" value={row.clientCount} />
-              <Tile label="Revenue" value={row.revenueEstimate} />
-              <Tile label="Years" value={row.yearsInBusiness} />
-              <Tile label="AI Sentiment" value={row.aiSentiment} />
+              <Tile label="Avg Client Rev" value={row.avgClientRevenue} />
+              <Tile label="Years" value={row.yearsInPractice} />
+              <Tile label="Lead Score" value={row.leadScore ? `${row.leadScore}/10` : null} />
             </>
           )}
         </div>
 
-        {/* Contact info */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24, fontSize: 13 }}>
           {row.email && <div><strong>Email:</strong> {row.email}</div>}
           {row.phone && <div><strong>Phone:</strong> {row.phone}</div>}
@@ -1938,31 +619,14 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
           {kind === 'business' && row.currentSpend && <div><strong>Current Spend:</strong> {row.currentSpend}</div>}
         </div>
 
-        {/* Rich sections */}
         {Array.isArray(pains) && pains.length > 0 && (
-          <Section title="😤 Pain Points">
-            <ChipList items={pains} color={COLORS.danger} />
-          </Section>
+          <Section title="😤 Pain Points"><ChipList items={pains} color={COLORS.danger} /></Section>
         )}
-        {Array.isArray(specialties) && specialties.length > 0 && (
-          <Section title="🎯 Specialties">
-            <ChipList items={specialties} color={COLORS.primary} />
-          </Section>
-        )}
-        {Array.isArray(techStack) && techStack.length > 0 && (
-          <Section title="🛠 Tech Stack">
-            <ChipList items={techStack} color={COLORS.blue} />
-          </Section>
+        {Array.isArray(softwareStack) && softwareStack.length > 0 && (
+          <Section title="🛠 Software Stack"><ChipList items={softwareStack} color={COLORS.blue} /></Section>
         )}
         {wtp && typeof wtp === 'object' && (
-          <Section title="💰 Willingness-to-Pay Signals">
-            <KVList obj={wtp} />
-          </Section>
-        )}
-        {acqSignals && typeof acqSignals === 'object' && (
-          <Section title="🤝 Acquisition Signals">
-            <KVList obj={acqSignals} />
-          </Section>
+          <Section title="💰 Willingness-to-Pay Signals"><KVList obj={wtp} /></Section>
         )}
         {Array.isArray(quotes) && quotes.length > 0 && (
           <Section title="💬 Quotable Lines">
@@ -1977,28 +641,22 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
           </Section>
         )}
 
-        {/* Transcripts */}
         <Section title="📄 Linked Transcripts">
           {transcripts.length === 0 ? (
-            <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>
-              No transcripts linked. Head to the Inbox to link one when it arrives from Plaud.
-            </div>
+            <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>No transcripts linked.</div>
           ) : (
             transcripts.map((t) => (
               <div key={t.id} style={{ padding: 14, border: `1px solid ${COLORS.border}`, borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.intervieweeName || 'Interview'} — {t.interviewDate}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.intervieweeName || t.intervieweeBusinessName || 'Interview'} — {t.interviewDate}</div>
                   <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
-                    Status: {t.status} ·
-                    {t.summaryUrl && <> <a href={t.summaryUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Summary</a></>}
+                    Status: {t.status}
+                    {t.summaryUrl && <> · <a href={t.summaryUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Summary</a></>}
                     {t.transcriptUrl && <> · <a href={t.transcriptUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Transcript</a></>}
                   </div>
                 </div>
-                <button
-                  onClick={() => runEnrich(t.id)}
-                  disabled={enrichingId === t.id}
-                  style={{ padding: '8px 14px', backgroundColor: enrichingId === t.id ? COLORS.border : COLORS.purple, color: enrichingId === t.id ? COLORS.textMuted : '#fff', border: 'none', borderRadius: 6, cursor: enrichingId === t.id ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 12 }}
-                >
+                <button onClick={() => runEnrich(t.id)} disabled={enrichingId === t.id}
+                  style={{ padding: '8px 14px', backgroundColor: enrichingId === t.id ? COLORS.border : COLORS.purple, color: enrichingId === t.id ? COLORS.textMuted : '#fff', border: 'none', borderRadius: 6, cursor: enrichingId === t.id ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 12 }}>
                   {enrichingId === t.id ? '⏳ Enriching…' : '✨ Enrich with Claude'}
                 </button>
               </div>
@@ -2051,192 +709,403 @@ function KVList({ obj }) {
   );
 }
 
-// ==================== TRANSCRIPTS INBOX ====================
-function TranscriptsInboxPage({ transcripts, practitioners, businesses, onLinkTranscript, onEnrich, onDelete, onUpsertPractitioner, onUpsertBusiness, loading }) {
-  const [filterStatus, setFilterStatus] = useState('all');
-  const visible = transcripts.filter((t) => filterStatus === 'all' || t.status === filterStatus);
+// ==================== SCRIPT PAGE ====================
+function ScriptPage({ contacts, scriptType }) {
+  const script = scriptType === 'pro' ? PRO_SCRIPT : BIZ_SCRIPT;
+  const [checkedQs, setCheckedQs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('autopilot-checklist') || '{}'); } catch { return {}; }
+  });
+
+  const toggleCheck = (key) => {
+    const newChecked = { ...checkedQs, [key]: !checkedQs[key] };
+    setCheckedQs(newChecked);
+    localStorage.setItem('autopilot-checklist', JSON.stringify(newChecked));
+  };
+
+  const clearProgress = () => {
+    if (window.confirm('Clear all checklist progress?')) {
+      setCheckedQs({});
+      localStorage.removeItem('autopilot-checklist');
+    }
+  };
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 20, maxWidth: 900 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h2 style={{ color: COLORS.text, margin: 0 }}>{scriptType === 'pro' ? 'Professional' : 'Business'} Script</h2>
+        <button onClick={clearProgress} style={{ padding: '8px 12px', backgroundColor: COLORS.danger, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>Clear Progress</button>
+      </div>
+      <div style={{ backgroundColor: COLORS.card, padding: 20, borderRadius: 4, border: `1px solid ${COLORS.border}` }}>
+        {script.sections.map((section, sectionIdx) => (
+          <div key={sectionIdx} style={{ marginBottom: 28 }}>
+            <h3 style={{ color: section.color, fontWeight: 700, marginBottom: 12, fontSize: 17 }}>{section.name}</h3>
+            {section.questions.map((question, qIdx) => {
+              const key = `${scriptType}-${sectionIdx}-${qIdx}`;
+              const isChecked = checkedQs[key];
+              return (
+                <label key={qIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', color: COLORS.text, fontSize: 15, lineHeight: 1.6, marginBottom: 12, padding: 10, backgroundColor: isChecked ? COLORS.bg : 'transparent', borderRadius: 4, textDecoration: isChecked ? 'line-through' : 'none', opacity: isChecked ? 0.6 : 1, border: `1px solid ${COLORS.border}` }}>
+                  <input type="checkbox" checked={isChecked} onChange={() => toggleCheck(key)} style={{ marginTop: 4, cursor: 'pointer', accentColor: COLORS.accent }} />
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{question.q}</div>
+                    <div style={{ fontSize: 13, color: COLORS.textDim, marginTop: 4 }}>{question.why}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ==================== THEMES PAGE ====================
+function ThemesPage({ businesses, practitioners, sheetsUrl }) {
+  const { call } = useAPI(sheetsUrl);
+  const [bizThemes, setBizThemes] = useState(null);
+  const [pracThemes, setPracThemes] = useState(null);
+  const [bizLoading, setBizLoading] = useState(false);
+  const [pracLoading, setPracLoading] = useState(false);
+  const [bizError, setBizError] = useState(null);
+  const [pracError, setPracError] = useState(null);
+
+  const analyzeBusinesses = async () => {
+    setBizLoading(true);
+    setBizError(null);
+    try {
+      const result = await call('analyzeThemes', { type: 'business' });
+      if (result && result.themes) setBizThemes(result.themes);
+      else setBizError(result?.error || 'Analysis failed — check API key in Settings');
+    } catch (e) {
+      setBizError(e.message);
+    }
+    setBizLoading(false);
+  };
+
+  const analyzePractitioners = async () => {
+    setPracLoading(true);
+    setPracError(null);
+    try {
+      const result = await call('analyzeThemes', { type: 'practitioner' });
+      if (result && result.themes) setPracThemes(result.themes);
+      else setPracError(result?.error || 'Analysis failed — check API key in Settings');
+    } catch (e) {
+      setPracError(e.message);
+    }
+    setPracLoading(false);
+  };
+
+  const enrichedBiz = businesses.filter(b => b.enrichedAt || b.painPoints);
+  const enrichedPrac = practitioners.filter(p => p.enrichedAt || p.painPoints);
+
+  return (
+    <div style={{ padding: 24, maxWidth: 1100 }}>
+      <h2 style={{ color: COLORS.text, margin: '0 0 6px', fontFamily: DISPLAY, fontSize: 28 }}>🧠 Themes</h2>
+      <p style={{ color: COLORS.textMuted, fontSize: 14, marginBottom: 36 }}>
+        Cross-interview synthesis. Claude analyzes all enriched records and extracts strategic patterns across your interview set.
+      </p>
+
+      <ThemeSection
+        title="Business Owner Themes"
+        icon="🏢"
+        color={COLORS.accent}
+        count={enrichedBiz.length}
+        total={businesses.length}
+        themes={bizThemes}
+        loading={bizLoading}
+        error={bizError}
+        onAnalyze={analyzeBusinesses}
+      />
+
+      <ThemeSection
+        title="Practitioner Themes"
+        icon="👥"
+        color={COLORS.primary}
+        count={enrichedPrac.length}
+        total={practitioners.length}
+        themes={pracThemes}
+        loading={pracLoading}
+        error={pracError}
+        onAnalyze={analyzePractitioners}
+      />
+    </div>
+  );
+}
+
+function ThemeSection({ title, icon, color, count, total, themes, loading, error, onAnalyze }) {
+  return (
+    <div style={{ marginBottom: 56 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ color: COLORS.text, margin: 0 }}>📥 Transcripts Inbox <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({transcripts.length})</span></h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {['all', 'new', 'linked', 'enriched'].map((s) => (
-            <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, backgroundColor: filterStatus === s ? COLORS.primary : COLORS.border, color: filterStatus === s ? '#fff' : COLORS.text, textTransform: 'capitalize' }}>{s}</button>
-          ))}
-        </div>
+        <h3 style={{ margin: 0, color: COLORS.text, fontSize: 20 }}>
+          {icon} {title}
+          <span style={{ color: COLORS.textDim, fontSize: 14, fontWeight: 400, marginLeft: 8 }}>
+            ({count} enriched{total !== count ? ` of ${total}` : ''})
+          </span>
+        </h3>
+        <button onClick={onAnalyze} disabled={loading || count === 0}
+          style={{ padding: '10px 22px', backgroundColor: loading || count === 0 ? COLORS.border : color, color: loading || count === 0 ? COLORS.textMuted : '#fff', border: 'none', borderRadius: 8, cursor: loading || count === 0 ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {loading ? (
+            <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'autopilot-spin 0.7s linear infinite' }} /> Analyzing…</>
+          ) : '🔍 Analyze Themes'}
+        </button>
       </div>
 
-      <div style={{ fontSize: 13, color: COLORS.textMuted, marginBottom: 16, padding: 14, backgroundColor: COLORS.primaryLight, borderRadius: 8, border: `1px solid ${COLORS.primary}20` }}>
-        💡 New interview transcripts from your Plaud → Zapier pipeline land here. For each, link it to an existing Practitioner or Business, then hit <strong>Enrich with Claude</strong> to auto-populate fields from the summary.
-      </div>
-
-      {visible.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
-          {transcripts.length === 0
-            ? 'No transcripts yet. Make sure your Zap is writing to the Transcripts sheet.'
-            : `No transcripts with status "${filterStatus}".`}
+      {error && (
+        <div style={{ padding: 12, backgroundColor: '#FEF2F2', borderRadius: 8, color: COLORS.danger, fontSize: 13, marginBottom: 16, border: '1px solid #FCA5A5' }}>
+          ✗ {error}
         </div>
-      ) : (
-        visible.map((t) => (
-          <TranscriptRow
-            key={t.id}
-            transcript={t}
-            practitioners={practitioners}
-            businesses={businesses}
-            onLink={onLinkTranscript}
-            onEnrich={onEnrich}
-            onDelete={onDelete}
-            onUpsertPractitioner={onUpsertPractitioner}
-            onUpsertBusiness={onUpsertBusiness}
-          />
-        ))
       )}
 
-      {loading && <div style={{ textAlign: 'center', padding: 16, color: COLORS.textDim }}>Loading…</div>}
+      {count === 0 && !themes && (
+        <div style={{ padding: 32, textAlign: 'center', backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}`, color: COLORS.textDim, fontSize: 14 }}>
+          No enriched records yet. Trigger Zapier with an interview to populate data.
+        </div>
+      )}
+
+      {themes && <ThemesDashboard themes={themes} color={color} />}
     </div>
   );
 }
 
-function TranscriptRow({ transcript, practitioners, businesses, onLink, onEnrich, onDelete, onUpsertPractitioner, onUpsertBusiness }) {
-  const [linkMode, setLinkMode] = useState(null); // null | 'practitioner' | 'business'
-  const [selectedId, setSelectedId] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState(null);
-
-  // Fuzzy-match suggestion
-  const suggestion = (() => {
-    if (!transcript.intervieweeName) return null;
-    const q = transcript.intervieweeName.toLowerCase();
-    const pMatch = practitioners.find((p) => p.name && p.name.toLowerCase().includes(q));
-    if (pMatch) return { kind: 'practitioner', row: pMatch };
-    const bMatch = businesses.find((b) => b.name && b.name.toLowerCase().includes(q));
-    if (bMatch) return { kind: 'business', row: bMatch };
-    return null;
-  })();
-
-  const pool = linkMode === 'practitioner' ? practitioners : linkMode === 'business' ? businesses : [];
-
-  const runLink = async (kind, contactId) => {
-    setBusy(true);
-    setFeedback(null);
-    const ok = await onLink(transcript.id, kind, contactId);
-    setBusy(false);
-    setFeedback(ok ? `✓ Linked to ${kind}` : '✗ Link failed');
-  };
-
-  const runEnrich = async () => {
-    setBusy(true);
-    setFeedback(null);
-    const ok = await onEnrich(transcript.linkedType, transcript.linkedContactId, transcript.id);
-    setBusy(false);
-    setFeedback(ok ? '✓ Enriched' : '✗ Enrichment failed — check Settings API key and Drive permissions.');
-  };
-
-  const createAndLink = async (kind) => {
-    setBusy(true);
-    const newId = `${kind === 'practitioner' ? 'prac' : 'biz'}-${Date.now()}`;
-    const row = {
-      id: newId,
-      name: transcript.intervieweeName || 'New from transcript',
-      status: 'new',
-      interviewDate: transcript.interviewDate,
-      transcriptUrl: transcript.transcriptUrl,
-      summaryUrl: transcript.summaryUrl,
-      source: 'plaud',
-    };
-    const ok = kind === 'practitioner' ? await onUpsertPractitioner(row) : await onUpsertBusiness(row);
-    if (ok) await onLink(transcript.id, kind, newId);
-    setBusy(false);
-    setFeedback(ok ? `✓ Created new ${kind} and linked` : '✗ Failed');
-  };
-
-  const enriched = transcript.status === 'enriched';
-  const linked = transcript.status === 'linked' || enriched;
-
+function ThemesDashboard({ themes, color }) {
   return (
-    <div style={{ padding: 16, backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, marginBottom: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text }}>
-            📄 {transcript.intervieweeName || '(Name not parsed)'}
-            <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, backgroundColor: enriched ? COLORS.primaryLight : linked ? COLORS.blueLight : COLORS.accentLight, color: enriched ? COLORS.primary : linked ? COLORS.blue : COLORS.accent }}>
-              {transcript.status}
-            </span>
-          </div>
-          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4 }}>
-            📅 {transcript.interviewDate}
-            {transcript.summaryUrl && <> · <a href={transcript.summaryUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Summary</a></>}
-            {transcript.transcriptUrl && <> · <a href={transcript.transcriptUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Transcript</a></>}
-          </div>
+    <div style={{ display: 'grid', gap: 16 }}>
+      {themes.executiveSummary && (
+        <div style={{ padding: 20, backgroundColor: color + '10', borderRadius: 10, border: `1px solid ${color}25` }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>Executive Summary</div>
+          <div style={{ fontSize: 15, lineHeight: 1.7, color: COLORS.text }}>{themes.executiveSummary}</div>
         </div>
-        <button onClick={() => window.confirm('Delete this transcript?') && onDelete(transcript.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 14 }}>🗑</button>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {themes.topPainPoints && themes.topPainPoints.length > 0 && (
+          <ThemeCard title="😤 Top Pain Points" color={COLORS.danger}>
+            {themes.topPainPoints.map((p, i) => (
+              <div key={i} style={{ padding: '10px 0', borderBottom: i < themes.topPainPoints.length - 1 ? `1px solid ${COLORS.border}` : 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: COLORS.text }}>{p.theme}</div>
+                  {p.frequency && <span style={{ fontSize: 11, color: COLORS.textDim, backgroundColor: COLORS.bg, padding: '2px 8px', borderRadius: 10, border: `1px solid ${COLORS.border}`, whiteSpace: 'nowrap', marginLeft: 8 }}>{p.frequency}</span>}
+                </div>
+                {p.evidence && <div style={{ fontSize: 12, color: COLORS.textMuted, lineHeight: 1.5 }}>{p.evidence}</div>}
+              </div>
+            ))}
+          </ThemeCard>
+        )}
+
+        {themes.wtpProfile && (
+          <ThemeCard title="💰 Willingness-to-Pay Profile" color={COLORS.gold}>
+            {themes.wtpProfile.priceRange && <KVRow label="Price Range" value={themes.wtpProfile.priceRange} />}
+            {themes.wtpProfile.sensitivity && <KVRow label="Price Sensitivity" value={themes.wtpProfile.sensitivity} />}
+            {themes.wtpProfile.keyInsight && (
+              <div style={{ marginTop: 10, padding: '8px 12px', backgroundColor: COLORS.goldLight, borderRadius: 6, fontSize: 12, color: COLORS.gold, lineHeight: 1.5 }}>
+                💡 {themes.wtpProfile.keyInsight}
+              </div>
+            )}
+            {themes.wtpProfile.primaryDrivers && themes.wtpProfile.primaryDrivers.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', marginBottom: 6 }}>Primary Drivers</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {themes.wtpProfile.primaryDrivers.map((d, i) => (
+                    <span key={i} style={{ padding: '4px 10px', borderRadius: 12, fontSize: 11, backgroundColor: COLORS.goldLight, color: COLORS.gold, border: `1px solid ${COLORS.gold}30` }}>{d}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </ThemeCard>
+        )}
+
+        {themes.idealCustomerProfile && (
+          <ThemeCard title="🎯 Ideal Customer Profile" color={COLORS.primary}>
+            {Object.entries(themes.idealCustomerProfile)
+              .filter(([, v]) => v && !(Array.isArray(v) && v.length === 0))
+              .map(([k, v]) => (
+                <KVRow key={k} label={k.replace(/([A-Z])/g, ' $1').trim()} value={Array.isArray(v) ? v.join(', ') : String(v)} />
+              ))}
+          </ThemeCard>
+        )}
+
+        {themes.competitiveLandscape && themes.competitiveLandscape.length > 0 && (
+          <ThemeCard title="⚔️ Competitive Landscape" color={COLORS.blue}>
+            {themes.competitiveLandscape.map((item, i) => (
+              <div key={i} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: i < themes.competitiveLandscape.length - 1 ? `1px solid ${COLORS.border}` : 'none' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: COLORS.text }}>{item.name || item}</div>
+                {item.insight && <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2, lineHeight: 1.5 }}>{item.insight}</div>}
+              </div>
+            ))}
+          </ThemeCard>
+        )}
       </div>
 
-      {!linked && suggestion && (
-        <div style={{ padding: 10, backgroundColor: COLORS.primaryLight, borderRadius: 6, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: 12 }}>
-            💡 <strong>Suggested match:</strong> {suggestion.row.name}
-            {suggestion.row.firmName && <> @ {suggestion.row.firmName}</>}
-            {suggestion.row.company && <> @ {suggestion.row.company}</>}
-            <span style={{ color: COLORS.textDim }}> ({suggestion.kind})</span>
+      {/* Practitioner-specific */}
+      {themes.firmLandscape && (
+        <ThemeCard title="🏢 Firm Landscape" color={COLORS.blue}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: themes.firmLandscape.insight ? 12 : 0 }}>
+            {themes.firmLandscape.dominantSize && (
+              <div style={{ padding: 12, backgroundColor: COLORS.bg, borderRadius: 8, textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.text }}>{themes.firmLandscape.dominantSize}</div>
+                <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: 'uppercase', marginTop: 2 }}>Dominant Size</div>
+              </div>
+            )}
+            {themes.firmLandscape.avgClientCount && (
+              <div style={{ padding: 12, backgroundColor: COLORS.bg, borderRadius: 8, textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.text }}>{themes.firmLandscape.avgClientCount}</div>
+                <div style={{ fontSize: 10, color: COLORS.textDim, textTransform: 'uppercase', marginTop: 2 }}>Avg Client Count</div>
+              </div>
+            )}
           </div>
-          <button onClick={() => runLink(suggestion.kind, suggestion.row.id)} disabled={busy} style={{ padding: '6px 14px', backgroundColor: COLORS.primary, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✓ Link</button>
-        </div>
+          {themes.firmLandscape.primaryServiceMix && <KVRow label="Service Mix" value={themes.firmLandscape.primaryServiceMix} />}
+          {themes.firmLandscape.insight && (
+            <div style={{ marginTop: 10, padding: '8px 12px', backgroundColor: COLORS.blueLight, borderRadius: 6, fontSize: 12, color: COLORS.blue, lineHeight: 1.5 }}>
+              💡 {themes.firmLandscape.insight}
+            </div>
+          )}
+        </ThemeCard>
       )}
 
-      {!linked && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button onClick={() => setLinkMode(linkMode === 'practitioner' ? null : 'practitioner')} style={{ padding: '6px 12px', backgroundColor: linkMode === 'practitioner' ? COLORS.primary : COLORS.border, color: linkMode === 'practitioner' ? '#fff' : COLORS.text, border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🔗 Link to Practitioner</button>
-          <button onClick={() => setLinkMode(linkMode === 'business' ? null : 'business')} style={{ padding: '6px 12px', backgroundColor: linkMode === 'business' ? COLORS.primary : COLORS.border, color: linkMode === 'business' ? '#fff' : COLORS.text, border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🔗 Link to Business</button>
-          <button onClick={() => createAndLink('practitioner')} disabled={busy} style={{ padding: '6px 12px', backgroundColor: COLORS.accent, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>➕ Create Practitioner</button>
-          <button onClick={() => createAndLink('business')} disabled={busy} style={{ padding: '6px 12px', backgroundColor: COLORS.accent, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>➕ Create Business</button>
-        </div>
+      {themes.aiReceptivity && (
+        <ThemeCard title="🤖 AI Receptivity" color={COLORS.purple}>
+          {themes.aiReceptivity.overall && <KVRow label="Overall Sentiment" value={themes.aiReceptivity.overall} />}
+          {themes.aiReceptivity.keyInsight && (
+            <div style={{ margin: '10px 0', padding: '8px 12px', backgroundColor: COLORS.purpleLight, borderRadius: 6, fontSize: 12, color: COLORS.purple, lineHeight: 1.5 }}>
+              💡 {themes.aiReceptivity.keyInsight}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 10 }}>
+            {themes.aiReceptivity.concerns && themes.aiReceptivity.concerns.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: COLORS.danger, fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Concerns</div>
+                {themes.aiReceptivity.concerns.map((c, i) => <div key={i} style={{ fontSize: 12, color: COLORS.text, padding: '3px 0' }}>• {c}</div>)}
+              </div>
+            )}
+            {themes.aiReceptivity.opportunities && themes.aiReceptivity.opportunities.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: COLORS.success, fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Opportunities</div>
+                {themes.aiReceptivity.opportunities.map((o, i) => <div key={i} style={{ fontSize: 12, color: COLORS.text, padding: '3px 0' }}>• {o}</div>)}
+              </div>
+            )}
+          </div>
+        </ThemeCard>
       )}
 
-      {linkMode && (
-        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
-            <option value="">Select a {linkMode}…</option>
-            {pool.map((r) => (
-              <option key={r.id} value={r.id}>{r.name} {r.firmName || r.company ? `(${r.firmName || r.company})` : ''}</option>
+      {themes.techStackInsights && (
+        <ThemeCard title="🛠 Tech Stack Insights" color={COLORS.blue}>
+          {themes.techStackInsights.dominant && themes.techStackInsights.dominant.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', marginBottom: 6 }}>Dominant Tools</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {themes.techStackInsights.dominant.map((t, i) => (
+                  <span key={i} style={{ padding: '4px 10px', borderRadius: 12, fontSize: 11, backgroundColor: COLORS.blueLight, color: COLORS.blue, border: `1px solid ${COLORS.blue}30` }}>{t}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {themes.techStackInsights.gaps && themes.techStackInsights.gaps.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', marginBottom: 6 }}>Gaps / Opportunities</div>
+              {themes.techStackInsights.gaps.map((g, i) => <div key={i} style={{ fontSize: 12, color: COLORS.text, padding: '3px 0' }}>• {g}</div>)}
+            </div>
+          )}
+          {themes.techStackInsights.switchingBarriers && <KVRow label="Switching Barriers" value={themes.techStackInsights.switchingBarriers} />}
+        </ThemeCard>
+      )}
+
+      {themes.pricingBenchmarks && (
+        <ThemeCard title="💵 Pricing Benchmarks" color={COLORS.gold}>
+          {themes.pricingBenchmarks.typicalMonthlyRange && <KVRow label="Typical Range" value={themes.pricingBenchmarks.typicalMonthlyRange} />}
+          {themes.pricingBenchmarks.profitableSegments && themes.pricingBenchmarks.profitableSegments.length > 0 && (
+            <KVRow label="Most Profitable" value={themes.pricingBenchmarks.profitableSegments.join(', ')} />
+          )}
+          {themes.pricingBenchmarks.keyInsight && (
+            <div style={{ marginTop: 10, padding: '8px 12px', backgroundColor: COLORS.goldLight, borderRadius: 6, fontSize: 12, color: COLORS.gold, lineHeight: 1.5 }}>
+              💡 {themes.pricingBenchmarks.keyInsight}
+            </div>
+          )}
+        </ThemeCard>
+      )}
+
+      {themes.partnershipSignals && themes.partnershipSignals.length > 0 && (
+        <ThemeCard title="🤝 Partnership Signals" color={COLORS.primary}>
+          {themes.partnershipSignals.map((s, i) => (
+            <div key={i} style={{ fontSize: 13, color: COLORS.text, padding: '5px 0', borderBottom: i < themes.partnershipSignals.length - 1 ? `1px solid ${COLORS.border}` : 'none' }}>• {s}</div>
+          ))}
+        </ThemeCard>
+      )}
+
+      {themes.keyQuotes && themes.keyQuotes.length > 0 && (
+        <ThemeCard title="💬 Voice of Customer" color={COLORS.accent}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 10 }}>
+            {themes.keyQuotes.map((q, i) => (
+              <div key={i} style={{ padding: '12px 14px', backgroundColor: COLORS.bg, borderLeft: `3px solid ${COLORS.accent}`, borderRadius: 4 }}>
+                <div style={{ fontStyle: 'italic', fontSize: 13, color: COLORS.text, lineHeight: 1.6 }}>"{typeof q === 'string' ? q : q.quote}"</div>
+                {(q.speaker || q.significance) && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: COLORS.textDim }}>
+                    {q.speaker && <span>— {q.speaker}</span>}
+                    {q.significance && <span style={{ marginLeft: 6, fontStyle: 'normal' }}>· {q.significance}</span>}
+                  </div>
+                )}
+              </div>
             ))}
-          </select>
-          <button onClick={() => selectedId && runLink(linkMode, selectedId)} disabled={!selectedId || busy} style={{ padding: '6px 14px', backgroundColor: COLORS.primary, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Link</button>
-        </div>
+          </div>
+        </ThemeCard>
       )}
 
-      {linked && !enriched && (
-        <div style={{ marginTop: 8 }}>
-          <button onClick={runEnrich} disabled={busy} style={{ padding: '8px 16px', backgroundColor: COLORS.purple, color: '#fff', border: 'none', borderRadius: 6, cursor: busy ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 13 }}>
-            {busy ? '⏳ Enriching…' : '✨ Enrich with Claude'}
-          </button>
-        </div>
+      {themes.strategicRecommendations && themes.strategicRecommendations.length > 0 && (
+        <ThemeCard title="🚀 Strategic Recommendations" color={COLORS.success}>
+          {themes.strategicRecommendations.map((rec, i) => (
+            <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 14, alignItems: 'flex-start' }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: COLORS.success, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{rec.title || rec}</div>
+                {rec.rationale && <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 3, lineHeight: 1.5 }}>{rec.rationale}</div>}
+              </div>
+            </div>
+          ))}
+        </ThemeCard>
       )}
 
-      {enriched && (
-        <div style={{ marginTop: 8, fontSize: 12, color: COLORS.success, fontWeight: 600 }}>
-          ✨ Enriched {transcript.processedAt ? `on ${new Date(transcript.processedAt).toLocaleDateString()}` : ''}
-        </div>
+      {themes.riskFlags && themes.riskFlags.length > 0 && (
+        <ThemeCard title="⚠️ Risk Flags" color={COLORS.warning}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {themes.riskFlags.map((flag, i) => (
+              <span key={i} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, backgroundColor: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A' }}>
+                {typeof flag === 'string' ? flag : flag.flag}
+              </span>
+            ))}
+          </div>
+        </ThemeCard>
       )}
-
-      {feedback && <div style={{ marginTop: 8, fontSize: 12, color: feedback.startsWith('✓') ? COLORS.success : COLORS.danger }}>{feedback}</div>}
     </div>
   );
 }
 
+function ThemeCard({ title, color, children }) {
+  return (
+    <div style={{ backgroundColor: COLORS.card, borderRadius: 10, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+      <div style={{ padding: '10px 16px', backgroundColor: color + '12', borderBottom: `1px solid ${color}20` }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: 0.5 }}>{title}</div>
+      </div>
+      <div style={{ padding: 16 }}>{children}</div>
+    </div>
+  );
+}
+
+function KVRow({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '7px 0', borderBottom: `1px solid ${COLORS.border}`, fontSize: 13, gap: 12 }}>
+      <span style={{ color: COLORS.textMuted, fontWeight: 600, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: COLORS.text, textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+}
+
+// ==================== MAIN APP ====================
 function App() {
   const [currentTab, setCurrentTab] = useState('practitioners');
-  const [contacts, setContacts] = useState([]); // legacy, unused in V2 flows
   const [practitioners, setPractitioners] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [transcripts, setTranscripts] = useState([]);
   const [sheetsUrl, setSheetsUrl] = useState(() => {
-    try {
-      return localStorage.getItem('autopilot-sheets-url') || '';
-    } catch {
-      return '';
-    }
+    try { return localStorage.getItem('autopilot-sheets-url') || ''; } catch { return ''; }
   });
   const [apiKey, setApiKey] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
@@ -2245,28 +1114,33 @@ function App() {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
 
-  // Load initial data on mount
   useEffect(() => {
     const loadData = async () => {
-      if (!sheetsUrl) {
-        setIsInitialized(true);
-        return;
-      }
-
+      if (!sheetsUrl) { setIsInitialized(true); return; }
       const data = await call('getData');
       if (data) {
-        setContacts(data.contacts || []);
         setPractitioners(data.practitioners || []);
         setBusinesses(data.businesses || []);
         setTranscripts(data.transcripts || []);
       }
       setIsInitialized(true);
     };
-
     loadData();
   }, [sheetsUrl]);
 
-  // ===== V2 handlers =====
+  useEffect(() => {
+    if (sheetsUrl) localStorage.setItem('autopilot-sheets-url', sheetsUrl);
+  }, [sheetsUrl]);
+
+  const refreshData = async () => {
+    const data = await call('getData');
+    if (data) {
+      setPractitioners(data.practitioners || []);
+      setBusinesses(data.businesses || []);
+      setTranscripts(data.transcripts || []);
+    }
+  };
+
   const handleUpsertPractitioner = async (row) => {
     const result = await call('upsertPractitioner', { data: row });
     if (result) {
@@ -2280,10 +1154,12 @@ function App() {
     }
     return false;
   };
+
   const handleDeletePractitioner = async (id) => {
     const result = await call('deletePractitioner', { id });
     if (result) setPractitioners((prev) => prev.filter((p) => p.id !== id));
   };
+
   const handleUpsertBusiness = async (row) => {
     const result = await call('upsertBusiness', { data: row });
     if (result) {
@@ -2297,201 +1173,65 @@ function App() {
     }
     return false;
   };
+
   const handleDeleteBusiness = async (id) => {
     const result = await call('deleteBusiness', { id });
     if (result) setBusinesses((prev) => prev.filter((b) => b.id !== id));
   };
+
   const handleLinkTranscript = async (transcriptId, linkedType, linkedContactId) => {
     const result = await call('linkTranscript', { transcriptId, linkedType, linkedContactId });
-    if (result) {
-      // refresh transcripts + targeted table
-      const data = await call('getData');
-      if (data) {
-        setTranscripts(data.transcripts || []);
-        setPractitioners(data.practitioners || []);
-        setBusinesses(data.businesses || []);
-      }
-      return true;
-    }
+    if (result) { await refreshData(); return true; }
     return false;
   };
+
   const handleEnrichContact = async (contactType, contactId, transcriptId) => {
     const result = await call('enrichContact', { contactType, contactId, transcriptId });
-    if (result) {
-      const data = await call('getData');
-      if (data) {
-        setTranscripts(data.transcripts || []);
-        setPractitioners(data.practitioners || []);
-        setBusinesses(data.businesses || []);
-      }
-      return true;
-    }
+    if (result) { await refreshData(); return true; }
     return false;
   };
+
   const handleDeleteTranscript = async (id) => {
     const result = await call('deleteTranscript', { id });
     if (result) setTranscripts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Save sheets URL to localStorage
-  useEffect(() => {
-    if (sheetsUrl) {
-      localStorage.setItem('autopilot-sheets-url', sheetsUrl);
-    }
-  }, [sheetsUrl]);
+  const combinedContacts = [
+    ...practitioners.map((p) => ({ ...p, type: 'pro' })),
+    ...businesses.map((b) => ({ ...b, type: 'biz' })),
+  ];
 
-  const handleAddContact = async (contact) => {
-    const result = await call('upsertContact', { data: contact });
-    if (result) {
-      setContacts((prev) => {
-        const existing = prev.findIndex((c) => c.id === contact.id);
-        if (existing >= 0) {
-          const updated = [...prev];
-          updated[existing] = contact;
-          return updated;
-        }
-        return [...prev, contact];
-      });
-      return true;
-    }
-    return false;
-  };
-
-  const handleDeleteContact = async (id) => {
-    const result = await call('deleteContact', { id });
-    if (result) {
-      setContacts((prev) => prev.filter((c) => c.id !== id));
-    }
-  };
-
-  const handleExportCSV = () => {
-    if (contacts.length === 0) {
-      alert('No contacts to export');
-      return;
-    }
-
-    const headers = [
-      'Name',
-      'Company',
-      'Role',
-      'Type',
-      'Industry',
-      'Phone',
-      'Email',
-      'Status',
-      'Interview Date',
-      'Source',
-      'Notes',
-    ];
-    const rows = contacts.map((c) => [
-      c.name,
-      c.company,
-      c.role,
-      c.type,
-      c.industry,
-      c.phone,
-      c.email,
-      c.status,
-      c.interviewDate,
-      c.source,
-      c.notes,
-    ]);
-
-    let csv = headers.join(',') + '\n';
-    rows.forEach((row) => {
-      csv += row.map((cell) => `"${cell || ''}"`).join(',') + '\n';
-    });
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `contacts-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const inboxCount = transcripts.filter((t) => t.status === 'new').length;
   const TABS = [
     { id: 'practitioners', label: '👥 Practitioners' },
     { id: 'businesses', label: '🏢 Businesses' },
-    { id: 'transcripts', label: `📥 Inbox${inboxCount ? ` (${inboxCount})` : ''}` },
+    { id: 'themes', label: '🧠 Themes' },
     { id: 'script-pro', label: '📝 PRO Script' },
     { id: 'script-biz', label: '📝 BIZ Script' },
-    { id: 'analysis', label: '🧠 Analyze' },
     { id: 'settings', label: '⚙ Settings' },
-  ];
-
-  const combinedContactsForLegacy = [
-    ...practitioners.map((p) => ({ ...p, type: 'pro', company: p.firmName })),
-    ...businesses.map((b) => ({ ...b, type: 'biz' })),
   ];
 
   const renderContent = () => {
     switch (currentTab) {
       case 'practitioners':
         return (
-          <V2ContactPage
-            kind="practitioner"
-            rows={practitioners}
-            transcripts={transcripts}
-            onUpsert={handleUpsertPractitioner}
-            onDelete={handleDeletePractitioner}
-            onLinkTranscript={handleLinkTranscript}
-            onEnrich={handleEnrichContact}
-            loading={loading}
-          />
+          <V2ContactPage kind="practitioner" rows={practitioners} transcripts={transcripts}
+            onUpsert={handleUpsertPractitioner} onDelete={handleDeletePractitioner}
+            onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
         );
       case 'businesses':
         return (
-          <V2ContactPage
-            kind="business"
-            rows={businesses}
-            transcripts={transcripts}
-            onUpsert={handleUpsertBusiness}
-            onDelete={handleDeleteBusiness}
-            onLinkTranscript={handleLinkTranscript}
-            onEnrich={handleEnrichContact}
-            loading={loading}
-          />
+          <V2ContactPage kind="business" rows={businesses} transcripts={transcripts}
+            onUpsert={handleUpsertBusiness} onDelete={handleDeleteBusiness}
+            onLinkTranscript={handleLinkTranscript} onEnrich={handleEnrichContact} loading={loading} />
         );
-      case 'transcripts':
-        return (
-          <TranscriptsInboxPage
-            transcripts={transcripts}
-            practitioners={practitioners}
-            businesses={businesses}
-            onLinkTranscript={handleLinkTranscript}
-            onEnrich={handleEnrichContact}
-            onDelete={handleDeleteTranscript}
-            onUpsertPractitioner={handleUpsertPractitioner}
-            onUpsertBusiness={handleUpsertBusiness}
-            loading={loading}
-          />
-        );
+      case 'themes':
+        return <ThemesPage businesses={businesses} practitioners={practitioners} sheetsUrl={sheetsUrl} />;
       case 'script-pro':
-        return <ScriptPage contacts={combinedContactsForLegacy} scriptType="pro" />;
+        return <ScriptPage contacts={combinedContacts} scriptType="pro" />;
       case 'script-biz':
-        return <ScriptPage contacts={combinedContactsForLegacy} scriptType="biz" />;
-      case 'analysis':
-        return (
-          <AnalysisPage
-            contacts={combinedContactsForLegacy}
-            sheetsUrl={sheetsUrl}
-            onAnalysisComplete={() => {
-              // Refresh data if needed
-            }}
-          />
-        );
+        return <ScriptPage contacts={combinedContacts} scriptType="biz" />;
       case 'settings':
-        return (
-          <SettingsPage
-            sheetsUrl={sheetsUrl}
-            setSheetsUrl={setSheetsUrl}
-            apiKey={apiKey}
-            setApiKey={setApiKey}
-          />
-        );
+        return <SettingsPage sheetsUrl={sheetsUrl} setSheetsUrl={setSheetsUrl} apiKey={apiKey} setApiKey={setApiKey} />;
       default:
         return null;
     }
@@ -2499,147 +1239,42 @@ function App() {
 
   if (!isInitialized) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100vh',
-          backgroundColor: COLORS.bg,
-          color: COLORS.text,
-        }}
-      >
-        Loading...
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: COLORS.bg, color: COLORS.text }}>
+        Loading…
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        backgroundColor: COLORS.bg,
-        color: COLORS.text,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      }}
-    >
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: COLORS.bg, color: COLORS.text, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <link href="https://fonts.googleapis.com/css2?family=Karla:wght@400;500;600;700;800&family=Fraunces:wght@700;800;900&display=swap" rel="stylesheet" />
-      {isMobile ? (
-        // Mobile layout with bottom nav
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            width: '100%',
-            height: '100%',
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              paddingBottom: '60px',
-            }}
-          >
-            {renderContent()}
-          </div>
 
-          <div
-            style={{
-              position: 'fixed',
-              bottom: '0',
-              left: '0',
-              right: '0',
-              height: '60px',
-              backgroundColor: COLORS.sidebar,
-              borderTop: `1px solid ${COLORS.border}`,
-              display: 'flex',
-              justifyContent: 'space-around',
-              alignItems: 'center',
-              zIndex: 100,
-            }}
-          >
+      {isMobile ? (
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>{renderContent()}</div>
+          <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 60, backgroundColor: COLORS.sidebar, borderTop: `1px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-around', alignItems: 'center', zIndex: 100 }}>
             {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setCurrentTab(tab.id)}
-                style={{
-                  flex: 1,
-                  height: '100%',
-                  backgroundColor:
-                    currentTab === tab.id ? COLORS.accent : 'transparent',
-                  color: currentTab === tab.id ? '#fff' : COLORS.textDim,
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '4px',
-                }}
-              >
+              <button key={tab.id} onClick={() => setCurrentTab(tab.id)}
+                style={{ flex: 1, height: '100%', backgroundColor: currentTab === tab.id ? COLORS.accent : 'transparent', color: currentTab === tab.id ? '#fff' : COLORS.textDim, border: 'none', cursor: 'pointer', fontSize: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 4 }}>
                 {tab.label}
               </button>
             ))}
           </div>
         </div>
       ) : (
-        // Desktop layout with sidebar
         <div style={{ display: 'flex', width: '100%' }}>
-          <div
-            style={{
-              width: '220px',
-              backgroundColor: COLORS.sidebar,
-              borderRight: `1px solid ${COLORS.border}`,
-              padding: '20px',
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            <h1
-              style={{
-                fontSize: '18px',
-                fontWeight: '700',
-                margin: '0 0 20px 0',
-                color: COLORS.accent,
-              }}
-            >
-              Autopilot
-            </h1>
+          <div style={{ width: '200px', backgroundColor: COLORS.sidebar, borderRight: `1px solid ${COLORS.border}`, padding: '20px 12px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <h1 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 20px 8px', color: COLORS.accent }}>Autopilot</h1>
             {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setCurrentTab(tab.id)}
-                style={{
-                  padding: '10px 12px',
-                  backgroundColor:
-                    currentTab === tab.id ? COLORS.accent : 'transparent',
-                  color: currentTab === tab.id ? '#fff' : COLORS.text,
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.2s',
-                }}
-              >
+              <button key={tab.id} onClick={() => setCurrentTab(tab.id)}
+                style={{ padding: '10px 12px', backgroundColor: currentTab === tab.id ? COLORS.accent : 'transparent', color: currentTab === tab.id ? '#fff' : COLORS.text, border: 'none', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontSize: 13, fontWeight: currentTab === tab.id ? 600 : 400, transition: 'all 0.15s' }}
+                onMouseEnter={(e) => { if (currentTab !== tab.id) e.currentTarget.style.backgroundColor = COLORS.border; }}
+                onMouseLeave={(e) => { if (currentTab !== tab.id) e.currentTarget.style.backgroundColor = 'transparent'; }}>
                 {tab.label}
               </button>
             ))}
           </div>
-
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              backgroundColor: COLORS.bg,
-            }}
-          >
-            {renderContent()}
-          </div>
+          <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{renderContent()}</div>
         </div>
       )}
     </div>

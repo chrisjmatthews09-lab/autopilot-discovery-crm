@@ -13,7 +13,7 @@
 //   - `processInterview()` wires it together for the hook: extract → load
 //     reference data → plan → execute.
 
-import { doc as fbDoc, serverTimestamp } from 'firebase/firestore';
+import { doc as fbDoc, collection as fbCollection, serverTimestamp } from 'firebase/firestore';
 import { extractEntity, enrichEntity } from './claudeService.js';
 import {
   findBestMatch,
@@ -187,7 +187,7 @@ function genId() {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('Not authenticated');
   // Use Firestore's auto-ID via an in-memory doc ref.
-  return fbDoc(db, `users/${uid}/_ids`).id;
+  return fbDoc(fbCollection(db, `users/${uid}/_ids`)).id;
 }
 
 /**

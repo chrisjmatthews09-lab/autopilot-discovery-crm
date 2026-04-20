@@ -659,6 +659,13 @@ function DedupResolutionPanel({ interview, people, companies }) {
             {retrying ? 'Retrying…' : '↻ Retry ingestion'}
           </button>
         )}
+        {(status === 'resolved' || status === 'review') && (
+          <button onClick={() => { if (window.confirm('Force-reprocess this interview from scratch? Existing auto-created person/company records will not be deleted.')) handleRetry(); }} disabled={retrying}
+            title="Re-run extraction + dedup against the latest logic. Use this if a record failed to create or linked incorrectly."
+            style={{ marginLeft: status === 'resolved' ? 0 : 'auto', padding: '4px 10px', background: retrying ? COLORS.border : COLORS.textMuted, color: '#fff', border: 'none', borderRadius: 4, cursor: retrying ? 'default' : 'pointer', fontSize: 11, fontWeight: 700 }}>
+            {retrying ? 'Reprocessing…' : '↻ Force reprocess'}
+          </button>
+        )}
       </div>
       {status === 'error' && interview.processingError && (
         <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}>
@@ -1345,15 +1352,36 @@ function PipelinePage({ people, companies, onUpdateStatus }) {
 }
 
 function InterviewTriage({ interview, people, companies, linkPick, setLinkPick, busy, onLinkExisting, onCreateAndLink }) {
+  const [expanded, setExpanded] = useState(false);
   const options = linkPick.type === 'company' ? companies : people;
   const sorted = [...options].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const intervieweeName = getIntervieweeName(interview);
   const intervieweeBusiness = getIntervieweeBusinessName(interview);
 
+  // Collapsed second-tier UI: auto-ingestion is the primary path, so hide
+  // manual triage behind a disclosure. Only expand by explicit user action.
+  if (!expanded) {
+    return (
+      <div style={{ marginTop: 10, fontSize: 12, color: COLORS.textMuted }}>
+        Not linked.{' '}
+        <button onClick={() => setExpanded(true)}
+          style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>
+          Triage manually
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ marginTop: 12, padding: 14, background: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 10 }}>
-        🔗 Unlinked — triage this interview
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text }}>
+          🔗 Manual triage
+        </div>
+        <button onClick={() => setExpanded(false)} disabled={busy}
+          style={{ background: 'none', border: 'none', color: COLORS.textMuted, cursor: 'pointer', padding: 0, fontSize: 11 }}>
+          Hide
+        </button>
       </div>
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
@@ -1418,18 +1446,38 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
     );
   }
 
-  const linkedRecord = interview.linkedType === 'person'
-    ? people.find((p) => p.id === interview.linkedContactId)
-    : interview.linkedType === 'company'
-    ? companies.find((c) => c.id === interview.linkedContactId)
+  // Self-heal: if ingestion wrote a match to dedupResolution but the legacy
+  // linkedType/linkedContactId fields are empty, derive them from the resolution
+  // so the triage card doesn't show alongside a successful auto-resolution.
+  const resolvedType = interview.linkedType
+    || (interview.dedupResolution?.matchedContactId ? 'person'
+      : interview.dedupResolution?.matchedBusinessId ? 'company' : null);
+  const resolvedId = interview.linkedContactId
+    || interview.dedupResolution?.matchedContactId
+    || interview.dedupResolution?.matchedBusinessId
+    || null;
+  const linkedRecord = resolvedType === 'person'
+    ? people.find((p) => p.id === resolvedId)
+    : resolvedType === 'company'
+    ? companies.find((c) => c.id === resolvedId)
     : null;
+
+  // Backfill legacy fields once so list/filter code that reads linkedType/linkedContactId
+  // catches up with ingestion output.
+  useEffect(() => {
+    if (!interview) return;
+    if (interview.linkedType && interview.linkedContactId) return;
+    if (!resolvedType || !resolvedId) return;
+    if (!linkedRecord) return;
+    onUpdate(interview.id, { linkedType: resolvedType, linkedContactId: resolvedId }).catch(() => {});
+  }, [interview?.id, resolvedType, resolvedId, linkedRecord?.id]);
 
   const summaryText = getInterviewSummary(interview);
   const transcriptText = getInterviewTranscript(interview);
   const activeText = tab === 'summary' ? summaryText : transcriptText;
   const activeUrl = tab === 'summary' ? getInterviewSummaryUrl(interview) : getInterviewTranscriptUrl(interview);
 
-  const inferredScriptType = interview.script_type || (interview.linkedType === 'person' ? 'pro' : 'biz');
+  const inferredScriptType = interview.script_type || (resolvedType === 'person' ? 'pro' : 'biz');
   const activeScript = scripts.find((s) => s.type === inferredScriptType || s.id === inferredScriptType);
   const totalQuestions = activeScript ? activeScript.sections.reduce((acc, s) => acc + s.questions.length, 0) : 0;
   const askedIds = new Set(interview.questions_asked || []);
@@ -1449,9 +1497,9 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
     if (!linkedRecord) { setAnalyzeStatus({ ok: false, msg: 'Link this interview to a person or company first.' }); return; }
     setAnalyzing(true);
     setAnalyzeStatus(null);
-    const ok = await onEnrich(interview.linkedType, linkedRecord.id, interview.id);
+    const ok = await onEnrich(resolvedType, linkedRecord.id, interview.id);
     setAnalyzing(false);
-    setAnalyzeStatus(ok ? { ok: true, msg: '✓ Analysis written to ' + (interview.linkedType === 'company' ? 'company' : 'person') + '.' } : { ok: false, msg: 'Analysis failed — check Settings / Drive permissions.' });
+    setAnalyzeStatus(ok ? { ok: true, msg: '✓ Analysis written to ' + (resolvedType === 'company' ? 'company' : 'person') + '.' } : { ok: false, msg: 'Analysis failed — check Settings / Drive permissions.' });
     if (ok) setTimeout(() => setAnalyzeStatus(null), 3500);
   };
 
@@ -1494,9 +1542,9 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
           {linkedRecord ? (
             <>
               Linked to{' '}
-              <button onClick={() => navigate(interview.linkedType === 'company' ? companyPath(linkedRecord) : personPath(linkedRecord))}
+              <button onClick={() => navigate(resolvedType === 'company' ? companyPath(linkedRecord) : personPath(linkedRecord))}
                 style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 600, textDecoration: 'underline' }}>
-                {interview.linkedType === 'company' ? '🏢' : '👤'} {linkedRecord.name}
+                {resolvedType === 'company' ? '🏢' : '👤'} {linkedRecord.name || '(unnamed)'}
               </button>
               {' · '}
               <button onClick={async () => { if (window.confirm('Unlink this interview?')) { await onLink(interview.id, '', ''); } }}

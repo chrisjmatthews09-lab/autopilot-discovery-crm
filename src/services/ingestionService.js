@@ -88,6 +88,15 @@ export function findBestCompanyMatch(targetName, companies) {
 export function planResolution(extractedEntity, people, companies) {
   if (!extractedEntity) return { decision: 'error', reason: 'no_extracted_entity' };
 
+  // If Claude couldn't identify any person or business in the audio (e.g. it's a
+  // voice-memo / process note, not a real interview), refuse to auto-create an
+  // empty record. Leave the interview as `unmatched` so the user can triage.
+  const hasName = Boolean(extractedEntity.firstName || extractedEntity.lastName);
+  const hasBusiness = Boolean(extractedEntity.businessName);
+  if (!hasName && !hasBusiness) {
+    return { decision: 'unmatched', reason: 'no_entity_detected', extractedEntity };
+  }
+
   const candidate = candidateFromEntity(extractedEntity);
   // Sprint 9 (PRD F3) — soft-deleted contacts are kept in Firestore for undo,
   // but must never participate in dedup matching.
@@ -331,6 +340,16 @@ export async function executePlan(plan, interviewId, jobId, log = () => {}) {
       break;
     }
 
+    case 'unmatched': {
+      // No entity extracted — leave the interview on the triage card so the
+      // user can link it manually. Still mark it as resolved so it doesn't
+      // churn through the pending queue forever.
+      result.method = 'no_match';
+      result.confidenceScore = null;
+      log(`unmatched — ${plan.reason || 'no_entity_detected'}`);
+      break;
+    }
+
     case 'create_both': {
       const personId = genId();
       const hasBusiness = Boolean(plan.extractedEntity.businessName);
@@ -363,9 +382,25 @@ export async function executePlan(plan, interviewId, jobId, log = () => {}) {
       throw new Error(`Unknown plan decision: ${plan.decision}`);
   }
 
+  // Mirror the dedup-pipeline result onto the legacy linkedType/linkedContactId
+  // fields. These are what most of the UI (detail page, contacts list, filters,
+  // timeline) reads, so without them the interview still looks "Unlinked" to
+  // the user even after auto-create/auto-merge.
+  let linkedType = null;
+  let linkedContactId = null;
+  if (result.matchedContactId) {
+    linkedType = 'person';
+    linkedContactId = result.matchedContactId;
+  } else if (result.matchedBusinessId) {
+    linkedType = 'company';
+    linkedContactId = result.matchedBusinessId;
+  }
+
   const interviewPatch = {
     workspace: workspaceFromEntity(plan.extractedEntity),
     extractedEntity: plan.extractedEntity || null,
+    linkedType,
+    linkedContactId,
     dedupResolution: {
       method: result.method,
       confidenceScore: result.confidenceScore,
@@ -607,12 +642,23 @@ export async function resolveReview(reviewItem, choice, options = {}) {
   });
 
   if (interviewId) {
+    let linkedType = null;
+    let linkedContactId = null;
+    if (matchedContactId) {
+      linkedType = 'person';
+      linkedContactId = matchedContactId;
+    } else if (matchedBusinessId) {
+      linkedType = 'company';
+      linkedContactId = matchedBusinessId;
+    }
     ops.push({
       type: 'update',
       collection: 'interviews',
       id: interviewId,
       data: {
         dedupStatus: 'resolved',
+        linkedType,
+        linkedContactId,
         dedupResolution: {
           method: 'user_resolved',
           confidenceScore: reviewItem.confidenceScore ?? null,

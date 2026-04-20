@@ -623,7 +623,8 @@ function DedupResolutionPanel({ interview, people, companies }) {
             <span style={{ color: COLORS.textMuted }}>
               {resolution.method === 'auto_merged' ? 'auto-merged'
                 : resolution.method === 'created_new' ? 'created new'
-                : resolution.method === 'user_resolved' ? 'user-resolved' : resolution.method}
+                : resolution.method === 'user_resolved' ? 'user-resolved'
+                : resolution.method === 'no_match' ? 'no entity detected — triage below' : resolution.method}
               {typeof resolution.confidenceScore === 'number' ? ` · ${Math.round(resolution.confidenceScore)}% confidence` : ''}
             </span>
             {matchedContact && (

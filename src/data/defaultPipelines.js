@@ -3,17 +3,18 @@ const stage = (id, label, probability, order, opts = {}) => ({
   is_won: !!opts.won, is_lost: !!opts.lost,
 });
 
+// HubSpot-style CRM funnel — MQL → SQL → Opportunity → Proposal → Close.
 export const DEFAULT_PIPELINES = [
   {
-    id: 'new_client',
-    name: 'New Client',
+    id: 'sales_pipeline',
+    name: 'Sales Pipeline',
     is_default: true,
     object_type: 'deal',
     stages: [
-      stage('discovery',    'Discovery',    0.2, 0),
-      stage('qualified',    'Qualified',    0.4, 1),
-      stage('proposal',     'Proposal',     0.6, 2),
-      stage('negotiation',  'Negotiation',  0.8, 3),
+      stage('mql',          'MQL',          0.2, 0),
+      stage('sql',          'SQL',          0.4, 1),
+      stage('opportunity',  'Opportunity',  0.6, 2),
+      stage('proposal',     'Proposal',     0.8, 3),
       stage('closed_won',   'Closed-Won',   1.0, 4, { won: true }),
       stage('closed_lost',  'Closed-Lost',  0.0, 5, { lost: true }),
     ],

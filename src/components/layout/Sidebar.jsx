@@ -113,11 +113,22 @@ export default function Sidebar({ user, onSignOut }) {
         flexShrink: 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 14px 10px' }}>
-        <span style={{ width: 14, height: 14, borderRadius: '50%', background: COLORS.accent, flexShrink: 0 }} />
-        <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0, letterSpacing: '-0.01em' }}>
-          <span style={{ color: COLORS.text }}>Autopilot</span>{' '}
-          <span style={{ color: COLORS.accent }}>Accounting</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px 6px' }}>
+        <img
+          src="/aa-logo.png"
+          alt="Autopilot Accounting"
+          style={{ width: 48, height: 48, flexShrink: 0, objectFit: 'contain' }}
+        />
+        <h1 style={{
+          fontSize: 20,
+          fontWeight: 800,
+          margin: 0,
+          letterSpacing: '-0.01em',
+          fontFamily: '"Times New Roman", Georgia, serif',
+          lineHeight: 1,
+        }}>
+          <span style={{ color: '#000000' }}>Autopilot</span>{' '}
+          <span style={{ color: '#1E3A8A' }}>Accounting</span>
         </h1>
       </div>
 

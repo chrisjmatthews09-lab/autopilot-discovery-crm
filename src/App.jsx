@@ -20,6 +20,7 @@ import { TagChips, TagPicker, RoleChips, RolePicker } from './components/ui/TagC
 import DedupeModal, { findDuplicatePerson, findDuplicateCompany } from './components/ui/DedupeModal';
 import CommandPalette from './components/ui/CommandPalette';
 import Timeline from './components/ui/Timeline';
+import ContactTimeline from './components/Timeline.jsx';
 import TasksCard from './components/ui/TasksCard';
 import DealsCard from './components/ui/DealsCard';
 import TargetsCard from './components/ui/TargetsCard';
@@ -826,11 +827,8 @@ function EnrichmentHistorySection({ history }) {
   );
 }
 
-function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEnrich, allPeople = [], allCompanies = [] }) {
-  const detailNavigate = useNavigate();
+function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], allCompanies = [] }) {
   const cfg = V2_SCHEMA[kind];
-  const [enrichingId, setEnrichingId] = useState(null);
-  const [enrichError, setEnrichError] = useState(null);
   const [convertOpen, setConvertOpen] = useState(false);
   const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return null; } };
 
@@ -841,14 +839,6 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
   const wtp = parse(row.wtpSignals);
   const quotes = parse(row.quotableLines);
   const softwareStack = parse(row.softwareStack);
-
-  const runEnrich = async (transcriptId) => {
-    setEnrichError(null);
-    setEnrichingId(transcriptId);
-    const ok = await onEnrich(transcriptId);
-    setEnrichingId(null);
-    if (!ok) setEnrichError('Enrichment failed — check Settings API key and Drive permissions.');
-  };
 
   return (
     <div style={{ padding: 20 }}>
@@ -943,31 +933,7 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
 
         <EnrichmentHistorySection history={row.enrichmentHistory} />
 
-        <Timeline entityType={kind} entityId={row.id} />
-
-        <Section title="📄 Linked Transcripts">
-          {transcripts.length === 0 ? (
-            <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>No transcripts linked.</div>
-          ) : (
-            transcripts.map((t) => (
-              <div key={t.id} onClick={() => detailNavigate(`/interviews/${t.id}`)}
-                style={{ padding: 14, border: `1px solid ${COLORS.border}`, borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.intervieweeName || t.intervieweeBusinessName || 'Interview'} — {t.interviewDate}</div>
-                  <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
-                    Status: {t.status}
-                    {t.summaryText && <> · <span style={{ color: COLORS.success }}>summary cached</span></>}
-                    {t.transcriptText && <> · <span style={{ color: COLORS.success }}>transcript cached</span></>}
-                  </div>
-                </div>
-                <div style={{ color: COLORS.textDim, fontSize: 18 }}>›</div>
-              </div>
-            ))
-          )}
-          {enrichError && <div style={{ fontSize: 12, color: COLORS.danger, marginTop: 8 }}>{enrichError}</div>}
-        </Section>
+        <ContactTimeline entityType={kind} entityId={row.id} />
       </div>
 
       {convertOpen && kind === 'person' && (

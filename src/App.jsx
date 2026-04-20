@@ -21,6 +21,7 @@ import DedupeModal, { findDuplicatePerson, findDuplicateCompany } from './compon
 import CommandPalette from './components/ui/CommandPalette';
 import Timeline from './components/ui/Timeline';
 import ContactTimeline from './components/Timeline.jsx';
+import CompanyContactsSection from './components/CompanyContactsSection.jsx';
 import TasksCard from './components/ui/TasksCard';
 import DealsCard from './components/ui/DealsCard';
 import TargetsCard from './components/ui/TargetsCard';
@@ -840,6 +841,51 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
   const quotes = parse(row.quotableLines);
   const softwareStack = parse(row.softwareStack);
 
+  // Sprint 8 — For companies, gather linked contacts so the timeline can roll
+  // up interviews/calls/notes across everyone at the business.
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const companyContacts = useMemo(() => {
+    if (kind !== 'company') return [];
+    const ws = row.workspace || 'crm';
+    return allPeople
+      .filter((p) => (p.workspace || 'deal_flow') === ws)
+      .filter((p) => (p.company_id && p.company_id === row.id)
+        || (row.name && norm(p.company) === norm(row.name))
+        || (row.company && norm(p.company) === norm(row.company)));
+  }, [kind, row, allPeople]);
+  const companyContactIds = useMemo(() => companyContacts.map((p) => p.id), [companyContacts]);
+  const peopleById = useMemo(() => {
+    const map = {};
+    companyContacts.forEach((p) => { map[p.id] = p; });
+    return map;
+  }, [companyContacts]);
+
+  const { data: allInterviews } = useCollection('interviews', { enabled: kind === 'company' });
+  const { data: allInteractions } = useCollection('interactions', { enabled: kind === 'company' });
+
+  const companyCounts = useMemo(() => {
+    if (kind !== 'company') return null;
+    const idSet = new Set([row.id, ...companyContactIds]);
+    const interviewCount = (allInterviews || []).reduce((n, iv) => {
+      const matchesCompany = (iv.linkedType === 'company' && iv.linkedContactId === row.id)
+        || iv.dedupResolution?.matchedBusinessId === row.id;
+      const matchesPerson = (iv.linkedType === 'person' && companyContactIds.includes(iv.linkedContactId))
+        || (iv.dedupResolution?.matchedContactId && companyContactIds.includes(iv.dedupResolution.matchedContactId));
+      return n + (matchesCompany || matchesPerson ? 1 : 0);
+    }, 0);
+    let callCount = 0;
+    let noteCount = 0;
+    (allInteractions || []).forEach((it) => {
+      if (it.kind !== 'call' && it.kind !== 'note') return;
+      const inScope = (it.entity_type === 'company' && it.entity_id === row.id)
+        || (it.entity_type === 'person' && idSet.has(it.entity_id));
+      if (!inScope) return;
+      if (it.kind === 'call') callCount += 1;
+      else noteCount += 1;
+    });
+    return { contacts: companyContacts.length, interviews: interviewCount, calls: callCount, notes: noteCount };
+  }, [kind, row.id, companyContactIds, companyContacts.length, allInterviews, allInteractions]);
+
   return (
     <div style={{ padding: 20 }}>
       <button onClick={onClose} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
@@ -858,6 +904,15 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
               {row.location && <> · 📍 {row.location}</>}
             </div>
             <div style={{ marginTop: 8 }}>{row.lifecycle_stage ? <LifecycleStagePill stage={row.lifecycle_stage} size="lg" /> : <StatusPill status={row.status} />}</div>
+            {kind === 'company' && companyCounts && (
+              <div style={{ marginTop: 10, fontSize: 12, color: COLORS.textMuted }}>
+                {companyCounts.contacts} contact{companyCounts.contacts === 1 ? '' : 's'}
+                {' · '}
+                {companyCounts.interviews} interview{companyCounts.interviews === 1 ? '' : 's'}
+                {companyCounts.calls > 0 && <> · {companyCounts.calls} call{companyCounts.calls === 1 ? '' : 's'}</>}
+                {companyCounts.notes > 0 && <> · {companyCounts.notes} note{companyCounts.notes === 1 ? '' : 's'}</>}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             {canConvert && (
@@ -923,6 +978,16 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
 
         <RelatedPanel row={row} kind={kind} allPeople={allPeople} allCompanies={allCompanies} />
 
+        {kind === 'company' && (
+          <CompanyContactsSection
+            company={row}
+            contacts={companyContacts}
+            interviews={allInterviews || []}
+            interactions={allInteractions || []}
+            workspaceId={row.workspace}
+          />
+        )}
+
         <DealsCard entityType={kind} entityId={row.id} />
 
         <TargetsCard entityType={kind} entityId={row.id} />
@@ -933,7 +998,12 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
 
         <EnrichmentHistorySection history={row.enrichmentHistory} />
 
-        <ContactTimeline entityType={kind} entityId={row.id} />
+        <ContactTimeline
+          entityType={kind}
+          entityId={row.id}
+          contactIds={kind === 'company' ? companyContactIds : undefined}
+          peopleById={kind === 'company' ? peopleById : undefined}
+        />
       </div>
 
       {convertOpen && kind === 'person' && (
@@ -953,7 +1023,6 @@ function RelatedPanel({ row, kind, allPeople, allCompanies }) {
   const norm = (s) => (s || '').trim().toLowerCase();
 
   const linkStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, marginBottom: 6, cursor: 'pointer', fontSize: 13, background: COLORS.cardAlt };
-  const emptyStyle = { fontSize: 12, color: COLORS.textDim, fontStyle: 'italic' };
 
   if (kind === 'person') {
     const company = allCompanies.find((c) => c.id === row.company_id) || allCompanies.find((c) => norm(c.name) === norm(row.company) || norm(c.company) === norm(row.company));
@@ -975,13 +1044,8 @@ function RelatedPanel({ row, kind, allPeople, allCompanies }) {
     );
   }
 
-  // kind === 'company'
-  const companyWorkspace = row.workspace || 'crm';
-  const peopleLabel = companyWorkspace === 'deal_flow' ? 'Practitioners' : 'People';
-  const peopleIcon = companyWorkspace === 'deal_flow' ? '👥' : '👥';
-  const relatedPeople = allPeople
-    .filter((p) => (p.workspace || 'deal_flow') === companyWorkspace)
-    .filter((p) => (p.company_id && p.company_id === row.id) || norm(p.company) === norm(row.name) || norm(p.company) === norm(row.company));
+  // kind === 'company' — contacts list is handled by CompanyContactsSection,
+  // so we only surface parent/subsidiary relationships here.
   const parent = row.parent_company_id ? allCompanies.find((c) => c.id === row.parent_company_id) : null;
   const subsidiaries = allCompanies.filter((c) => c.parent_company_id === row.id);
 
@@ -1008,25 +1072,6 @@ function RelatedPanel({ row, kind, allPeople, allCompanies }) {
           ))}
         </Section>
       )}
-      <Section title={`${peopleIcon} ${peopleLabel} (${relatedPeople.length})`}>
-        {relatedPeople.length === 0 ? (
-          <div style={emptyStyle}>No {peopleLabel.toLowerCase()} linked to this {companyWorkspace === 'deal_flow' ? 'firm' : 'company'} yet.</div>
-        ) : (
-          relatedPeople.map((p) => (
-            <div key={p.id} style={linkStyle} onClick={() => navigate(personPath(p))}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{p.name}</div>
-                <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
-                  {p.role && <>{p.role}</>}
-                  {p.email && <> · {p.email}</>}
-                  {p.lifecycle_stage && <> · {p.lifecycle_stage}</>}
-                </div>
-              </div>
-              <div style={{ color: COLORS.textDim, fontSize: 16 }}>›</div>
-            </div>
-          ))
-        )}
-      </Section>
     </>
   );
 }

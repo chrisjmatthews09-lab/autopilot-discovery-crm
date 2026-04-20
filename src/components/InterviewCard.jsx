@@ -27,7 +27,7 @@ function previewText(text, maxChars = 180) {
   return cleaned.length > maxChars ? `${cleaned.slice(0, maxChars)}…` : cleaned;
 }
 
-export default function InterviewCard({ interview, ordinal }) {
+export default function InterviewCard({ interview, ordinal, contactLabel }) {
   const [modalMode, setModalMode] = useState(null); // 'transcript' | 'summary' | null
 
   const dateValue = interview.interviewDate || interview.createdAt;
@@ -38,6 +38,9 @@ export default function InterviewCard({ interview, ordinal }) {
 
   const summarySnippet = previewText(interview.summaryText || interview.summary || '');
   const topic = interview.intervieweeName || interview.intervieweeBusinessName || 'Interview';
+  const heading = contactLabel
+    ? `Interview #${ordinal || 1} · with ${contactLabel}`
+    : `Interview #${ordinal || 1}`;
 
   return (
     <div style={{
@@ -51,7 +54,7 @@ export default function InterviewCard({ interview, ordinal }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16 }}>🎙️</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>
-            Interview #{ordinal || 1}
+            {heading}
           </span>
           <span title={fullTimestamp(dateValue)} style={{ fontSize: 12, color: COLORS.textMuted }}>
             {shortDate(dateValue)}

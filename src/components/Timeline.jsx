@@ -44,50 +44,95 @@ function interviewBelongsTo(interview, entityType, entityId) {
   return false;
 }
 
-export default function Timeline({ entityType, entityId }) {
+/**
+ * Return the person id associated with an interview, if any — used when
+ * the timeline is combined across multiple contacts at a business so each
+ * card can be labelled with whom the interview was.
+ */
+function personIdForInterview(interview) {
+  if (interview.linkedType === 'person' && interview.linkedContactId) return interview.linkedContactId;
+  if (interview.dedupResolution?.matchedContactId) return interview.dedupResolution.matchedContactId;
+  return null;
+}
+
+/**
+ * @param {object} props
+ * @param {'person'|'company'} props.entityType
+ * @param {string} props.entityId
+ * @param {string[]} [props.contactIds]   When entityType='company', roll up
+ *                                        interactions from these person ids
+ *                                        into the same feed (combined view).
+ * @param {Record<string, {name?:string}>} [props.peopleById]  Lookup for
+ *                                        rendering "with John Smith" labels.
+ */
+export default function Timeline({ entityType, entityId, contactIds, peopleById }) {
   const { data: interviews, loading: loadingInterviews } = useCollection('interviews');
   const { data: interactions, loading: loadingInteractions } = useCollection('interactions');
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [composing, setComposing] = useState(null); // 'note' | 'call' | null
 
-  // Interviews for this contact, with an ordinal position (oldest = #1) so
-  // the card can show "Interview #3" correctly even when the list is sorted
-  // newest-first.
+  const rollUpIds = useMemo(() => (Array.isArray(contactIds) ? contactIds.filter(Boolean) : []), [contactIds]);
+  const combinedMode = entityType === 'company' && rollUpIds.length > 0;
+
+  // Interviews for this entity (plus any rolled-up contacts for combined view),
+  // with an ordinal position (oldest = #1) so the card can show "Interview #3"
+  // correctly even when the list is sorted newest-first.
   const contactInterviews = useMemo(() => {
-    const mine = (interviews || []).filter((iv) => interviewBelongsTo(iv, entityType, entityId));
+    const mine = (interviews || []).filter((iv) => {
+      if (interviewBelongsTo(iv, entityType, entityId)) return true;
+      if (!combinedMode) return false;
+      const pid = personIdForInterview(iv);
+      return !!pid && rollUpIds.includes(pid);
+    });
     const sortedOldFirst = [...mine].sort((a, b) => toMs(a.interviewDate || a.createdAt) - toMs(b.interviewDate || b.createdAt));
     const ordinalById = new Map();
     sortedOldFirst.forEach((iv, i) => ordinalById.set(iv.id, i + 1));
     return mine.map((iv) => ({ ...iv, _ordinal: ordinalById.get(iv.id) || 1 }));
-  }, [interviews, entityType, entityId]);
+  }, [interviews, entityType, entityId, combinedMode, rollUpIds]);
 
   const contactInteractions = useMemo(() => {
-    return (interactions || []).filter((it) => (
-      it.entity_type === entityType
-      && it.entity_id === entityId
-      && (it.kind === 'call' || it.kind === 'note')
-    ));
-  }, [interactions, entityType, entityId]);
+    return (interactions || []).filter((it) => {
+      if (it.kind !== 'call' && it.kind !== 'note') return false;
+      if (it.entity_type === entityType && it.entity_id === entityId) return true;
+      if (combinedMode && it.entity_type === 'person' && rollUpIds.includes(it.entity_id)) return true;
+      return false;
+    });
+  }, [interactions, entityType, entityId, combinedMode, rollUpIds]);
 
   const merged = useMemo(() => {
+    const labelFor = (personId) => {
+      if (!personId || !peopleById) return null;
+      const p = peopleById[personId];
+      if (!p) return null;
+      return p.name || p.fullName || [p.firstName, p.lastName].filter(Boolean).join(' ') || null;
+    };
+
     const rows = [
-      ...contactInterviews.map((iv) => ({
-        key: `iv-${iv.id}`,
-        kind: 'interview',
-        ts: toMs(iv.interviewDate || iv.createdAt),
-        data: iv,
-      })),
-      ...contactInteractions.map((it) => ({
-        key: `int-${it.id}`,
-        kind: it.kind,
-        ts: toMs(it.occurred_at || it.createdAt),
-        data: it,
-      })),
+      ...contactInterviews.map((iv) => {
+        const pid = combinedMode ? personIdForInterview(iv) : null;
+        return {
+          key: `iv-${iv.id}`,
+          kind: 'interview',
+          ts: toMs(iv.interviewDate || iv.createdAt),
+          data: iv,
+          contactLabel: combinedMode ? labelFor(pid) : null,
+        };
+      }),
+      ...contactInteractions.map((it) => {
+        const pid = it.entity_type === 'person' ? it.entity_id : null;
+        return {
+          key: `int-${it.id}`,
+          kind: it.kind,
+          ts: toMs(it.occurred_at || it.createdAt),
+          data: it,
+          contactLabel: combinedMode ? labelFor(pid) : null,
+        };
+      }),
     ];
     rows.sort((a, b) => b.ts - a.ts);
     return rows;
-  }, [contactInterviews, contactInteractions]);
+  }, [contactInterviews, contactInteractions, combinedMode, peopleById]);
 
   const loading = loadingInterviews || loadingInteractions;
   const visible = merged.slice(0, visibleCount);
@@ -132,9 +177,9 @@ export default function Timeline({ entityType, entityId }) {
       ) : (
         <>
           {visible.map((row) => {
-            if (row.kind === 'interview') return <InterviewCard key={row.key} interview={row.data} ordinal={row.data._ordinal} />;
-            if (row.kind === 'call') return <CallCard key={row.key} interaction={row.data} />;
-            if (row.kind === 'note') return <NoteCard key={row.key} interaction={row.data} />;
+            if (row.kind === 'interview') return <InterviewCard key={row.key} interview={row.data} ordinal={row.data._ordinal} contactLabel={row.contactLabel} />;
+            if (row.kind === 'call') return <CallCard key={row.key} interaction={row.data} contactLabel={row.contactLabel} />;
+            if (row.kind === 'note') return <NoteCard key={row.key} interaction={row.data} contactLabel={row.contactLabel} />;
             return null;
           })}
           {canLoadMore && (

@@ -18,7 +18,7 @@ function fullTimestamp(value) {
   return d.toLocaleString();
 }
 
-export default function CallCard({ interaction }) {
+export default function CallCard({ interaction, contactLabel }) {
   const [editing, setEditing] = useState(false);
   const [duration, setDuration] = useState(interaction.meta?.duration || '');
   const [body, setBody] = useState(interaction.body || '');
@@ -59,7 +59,9 @@ export default function CallCard({ interaction }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 16 }}>📞</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>Call</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>
+            Call{contactLabel ? ` · with ${contactLabel}` : ''}
+          </span>
           <span title={fullTimestamp(dateValue)} style={{ fontSize: 12, color: COLORS.textMuted }}>
             {shortDate(dateValue)}
           </span>

@@ -19,7 +19,7 @@ function fullTimestamp(value) {
   return d.toLocaleString();
 }
 
-export default function NoteCard({ interaction, authorLabel = 'Chris' }) {
+export default function NoteCard({ interaction, authorLabel = 'Chris', contactLabel }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(interaction.title || '');
   const [body, setBody] = useState(interaction.body || '');
@@ -60,7 +60,9 @@ export default function NoteCard({ interaction, authorLabel = 'Chris' }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 16 }}>📝</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>Note</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>
+            Note{contactLabel ? ` · on ${contactLabel}` : ''}
+          </span>
           <span title={fullTimestamp(dateValue)} style={{ fontSize: 12, color: COLORS.textMuted }}>
             {shortDate(dateValue)}
           </span>

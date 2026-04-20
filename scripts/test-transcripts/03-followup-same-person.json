@@ -1,0 +1,30 @@
+{
+  "id": "03-followup-same-person",
+  "description": "Follow-up interview with the same John Smith — email match, should attach.",
+  "extractedEntity": {
+    "firstName": "John",
+    "lastName": "Smith",
+    "businessName": "Acme Construction",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": "john@acmeconstruction.com",
+    "phone": "555-207-4412"
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-john",
+        "firstName": "John",
+        "lastName": "Smith",
+        "name": "John Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "john@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "attach_existing_person"
+}

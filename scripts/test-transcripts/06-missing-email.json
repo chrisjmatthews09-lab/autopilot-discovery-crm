@@ -1,0 +1,30 @@
+{
+  "id": "06-missing-email",
+  "description": "Partial data — no email. Must still match via name+business.",
+  "extractedEntity": {
+    "firstName": "John",
+    "lastName": "Smith",
+    "businessName": "Acme Construction",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": null,
+    "phone": null
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-john",
+        "firstName": "John",
+        "lastName": "Smith",
+        "name": "John Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "john@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "attach_existing_person"
+}

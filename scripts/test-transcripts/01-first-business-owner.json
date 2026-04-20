@@ -1,0 +1,15 @@
+{
+  "id": "01-first-business-owner",
+  "description": "Classic first-time business owner interview — no existing records.",
+  "extractedEntity": {
+    "firstName": "John",
+    "lastName": "Smith",
+    "businessName": "Acme Construction, LLC",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": "john@acmeconstruction.com",
+    "phone": "555-207-4412"
+  },
+  "existing": { "people": [], "companies": [] },
+  "expectedDecision": "create_both"
+}

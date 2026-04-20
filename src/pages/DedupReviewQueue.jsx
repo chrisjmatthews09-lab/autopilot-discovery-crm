@@ -23,6 +23,8 @@ export default function DedupReviewQueue() {
     filters: [['status', '==', 'pending']],
   });
 
+  const { data: interviews } = useCollection('interviews');
+
   const counts = useMemo(() => {
     const out = { crm: 0, deal_flow: 0, unknown: 0 };
     for (const it of items || []) {
@@ -53,6 +55,8 @@ export default function DedupReviewQueue() {
           Tier-3 matches that need a human decision before they attach or create new records.
         </div>
       </div>
+
+      <DedupStats interviews={interviews} />
 
       <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 18 }}>
         {TABS.map((t) => {
@@ -170,5 +174,86 @@ function ReviewItemRow({ item }) {
       existingContact={isContact ? existing : null}
       existingCompany={isContact ? null : existing}
     />
+  );
+}
+
+// Sprint 10 — Lightweight aggregate over dedupResolution.method across all
+// interviews. Drives the "watch for degradation" banner above the queue. Pure
+// computation over already-loaded data, so no extra fetches.
+function DedupStats({ interviews }) {
+  const stats = useMemo(() => {
+    const rows = (interviews || []).filter((iv) => iv.dedupResolution?.method);
+    if (rows.length === 0) return null;
+    let autoAttached = 0;
+    let manualReview = 0;
+    let createdNew = 0;
+    let confSum = 0;
+    let confCount = 0;
+    for (const iv of rows) {
+      const m = iv.dedupResolution.method;
+      if (m === 'auto_merged') autoAttached += 1;
+      else if (m === 'user_resolved') manualReview += 1;
+      else if (m === 'created_new') createdNew += 1;
+      const c = iv.dedupResolution.confidenceScore;
+      if (typeof c === 'number') {
+        confSum += c;
+        confCount += 1;
+      }
+    }
+    const total = rows.length;
+    const pct = (n) => (total === 0 ? 0 : Math.round((n / total) * 100));
+    return {
+      total,
+      autoAttachedPct: pct(autoAttached),
+      manualReviewPct: pct(manualReview),
+      createdNewPct: pct(createdNew),
+      avgConfidence: confCount === 0 ? null : Math.round(confSum / confCount),
+    };
+  }, [interviews]);
+
+  if (!stats) return null;
+
+  const cell = {
+    flex: 1,
+    minWidth: 110,
+    padding: '10px 14px',
+    borderRight: `1px solid ${COLORS.border}`,
+  };
+  const lastCell = { ...cell, borderRight: 'none' };
+  const label = { fontSize: 11, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 };
+  const value = { fontSize: 18, fontWeight: 700, color: COLORS.text, marginTop: 2 };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        background: COLORS.card,
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: 10,
+        marginBottom: 18,
+      }}
+    >
+      <div style={cell}>
+        <div style={label}>Ingested</div>
+        <div style={value}>{stats.total}</div>
+      </div>
+      <div style={cell}>
+        <div style={label}>Auto-attached</div>
+        <div style={value}>{stats.autoAttachedPct}%</div>
+      </div>
+      <div style={cell}>
+        <div style={label}>Manual review</div>
+        <div style={value}>{stats.manualReviewPct}%</div>
+      </div>
+      <div style={cell}>
+        <div style={label}>Created new</div>
+        <div style={value}>{stats.createdNewPct}%</div>
+      </div>
+      <div style={lastCell}>
+        <div style={label}>Avg confidence</div>
+        <div style={value}>{stats.avgConfidence == null ? '—' : `${stats.avgConfidence}%`}</div>
+      </div>
+    </div>
   );
 }

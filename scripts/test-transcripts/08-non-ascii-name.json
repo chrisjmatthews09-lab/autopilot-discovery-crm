@@ -1,0 +1,30 @@
+{
+  "id": "08-non-ascii-name",
+  "description": "Unicode name. Current normalizer strips accents, so José ≈ Jose. Documented gap — see docs/dedup-calibration.md.",
+  "extractedEntity": {
+    "firstName": "José",
+    "lastName": "García",
+    "businessName": "García Landscaping",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": "jose@garcialandscaping.com",
+    "phone": null
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-jose",
+        "firstName": "José",
+        "lastName": "García",
+        "name": "José García",
+        "businessName": "García Landscaping",
+        "email": "jose@garcialandscaping.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-gl", "name": "García Landscaping", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "attach_existing_person"
+}

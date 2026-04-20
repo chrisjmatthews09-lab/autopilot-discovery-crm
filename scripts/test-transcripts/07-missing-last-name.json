@@ -1,0 +1,30 @@
+{
+  "id": "07-missing-last-name",
+  "description": "First name only — should not crash; email carries the match.",
+  "extractedEntity": {
+    "firstName": "John",
+    "lastName": null,
+    "businessName": "Acme Construction",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": "john@acmeconstruction.com",
+    "phone": null
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-john",
+        "firstName": "John",
+        "lastName": "Smith",
+        "name": "John Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "john@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "attach_existing_person"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "10-changed-jobs",
+  "description": "Same person, new employer — should route to review so a human can decide 'update record' vs 'create new'.",
+  "extractedEntity": {
+    "firstName": "John",
+    "lastName": "Smith",
+    "businessName": "Beta Consulting, Inc",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": "john.smith@betaconsulting.com",
+    "phone": null
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-john",
+        "firstName": "John",
+        "lastName": "Smith",
+        "name": "John Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "john@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "create_both"
+}

@@ -7,6 +7,7 @@ import { createDoc, updateDoc, deleteDoc } from '../data/firestore';
 import { clearStoredToken, connectBoth, connectCalendar, connectGmail, getGoogleConnectionStatus } from '../data/google';
 import { migrateWorkspaceBackfill, migrateDedupFields } from '../data/migrate';
 import { undoMerge } from '../data/merges';
+import { findDuplicatePersonPairs, findDuplicateCompanyPairs } from '../lib/dedup/duplicateScan';
 
 export default function Settings({ user, onSignOut }) {
   return (
@@ -33,6 +34,8 @@ export default function Settings({ user, onSignOut }) {
       <DedupBackfillSection />
 
       <RecentMergesSection />
+
+      <DedupHealthCheckSection />
 
       <TagsSection />
 
@@ -314,6 +317,150 @@ function RecentMergesSection() {
       {okMsg && <div style={{ marginTop: 10, fontSize: 12, color: COLORS.success }}>{okMsg}</div>}
       {error && <div style={{ marginTop: 10, fontSize: 12, color: COLORS.danger }}>{error}</div>}
     </Section>
+  );
+}
+
+// Sprint 10 — On-demand scan for pre-existing duplicates the ingestion pipeline
+// never got a chance to catch. Read-only; it surfaces pairs but doesn't merge.
+// Use Merge on a contact page to resolve.
+function DedupHealthCheckSection() {
+  const { data: peopleRaw } = useCollection('people');
+  const { data: companiesRaw } = useCollection('companies');
+  const [ran, setRan] = useState(false);
+  const [personPairs, setPersonPairs] = useState([]);
+  const [companyPairs, setCompanyPairs] = useState([]);
+
+  const runScan = () => {
+    const livePeople = (peopleRaw || []).filter((p) => !p.deletedAt);
+    const liveCompanies = (companiesRaw || []).filter((c) => !c.deletedAt);
+    setPersonPairs(findDuplicatePersonPairs(livePeople));
+    setCompanyPairs(findDuplicateCompanyPairs(liveCompanies));
+    setRan(true);
+  };
+
+  const personCount = (peopleRaw || []).filter((p) => !p.deletedAt).length;
+  const companyCount = (companiesRaw || []).filter((c) => !c.deletedAt).length;
+
+  return (
+    <Section
+      title="Dedup health check"
+      subtitle="Scan existing contacts and companies for near-duplicates the ingestion pipeline didn't catch. Open either record and use Merge to resolve."
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          onClick={runScan}
+          style={{
+            padding: '8px 14px', background: COLORS.primary, color: '#fff',
+            border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+          }}
+        >
+          Run scan
+        </button>
+        <div style={{ fontSize: 12, color: COLORS.textMuted }}>
+          Will compare {personCount} contacts and {companyCount} companies.
+        </div>
+      </div>
+
+      {ran && (
+        <div style={{ marginTop: 14 }}>
+          {personPairs.length === 0 && companyPairs.length === 0 ? (
+            <div style={{ fontSize: 12, color: COLORS.success }}>
+              No near-duplicate pairs found.
+            </div>
+          ) : (
+            <>
+              {personPairs.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.text, marginBottom: 6 }}>
+                    Contact pairs ({personPairs.length})
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {personPairs.slice(0, 20).map((p, i) => (
+                      <DuplicatePairRow
+                        key={`p-${i}`}
+                        a={p.a}
+                        b={p.b}
+                        kind="person"
+                        confidence={p.confidence}
+                        detail={`name ${p.nameMatch}% · business ${p.businessMatch}%`}
+                      />
+                    ))}
+                    {personPairs.length > 20 && (
+                      <div style={{ fontSize: 11, color: COLORS.textDim, fontStyle: 'italic' }}>
+                        …and {personPairs.length - 20} more. Resolve the top matches first.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {companyPairs.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.text, marginBottom: 6 }}>
+                    Company pairs ({companyPairs.length})
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {companyPairs.slice(0, 20).map((p, i) => (
+                      <DuplicatePairRow
+                        key={`c-${i}`}
+                        a={p.a}
+                        b={p.b}
+                        kind="company"
+                        confidence={p.confidence}
+                      />
+                    ))}
+                    {companyPairs.length > 20 && (
+                      <div style={{ fontSize: 11, color: COLORS.textDim, fontStyle: 'italic' }}>
+                        …and {companyPairs.length - 20} more.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function DuplicatePairRow({ a, b, kind, confidence, detail }) {
+  const label = (x) => {
+    if (kind === 'person') {
+      return x.name || [x.firstName, x.lastName].filter(Boolean).join(' ') || x.id;
+    }
+    return x.name || x.company || x.id;
+  };
+  const sub = (x) => {
+    if (kind === 'person') return x.businessName || x.email || '';
+    return '';
+  };
+  return (
+    <div style={{
+      padding: '8px 10px', border: `1px solid ${COLORS.border}`, borderRadius: 6,
+      background: COLORS.card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+    }}>
+      <div style={{ flex: 1, minWidth: 240, fontSize: 12 }}>
+        <div style={{ color: COLORS.text, fontWeight: 600 }}>
+          {label(a)} ↔ {label(b)}
+        </div>
+        {(sub(a) || sub(b)) && (
+          <div style={{ color: COLORS.textDim, marginTop: 2 }}>
+            {sub(a)}{sub(a) && sub(b) ? ' · ' : ''}{sub(b)}
+          </div>
+        )}
+        {detail && (
+          <div style={{ color: COLORS.textDim, marginTop: 2 }}>{detail}</div>
+        )}
+      </div>
+      <div style={{
+        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+        background: confidence >= 90 ? COLORS.primaryLight : COLORS.cardAlt,
+        color: confidence >= 90 ? COLORS.primary : COLORS.textMuted,
+      }}>
+        {confidence}% match
+      </div>
+    </div>
   );
 }
 

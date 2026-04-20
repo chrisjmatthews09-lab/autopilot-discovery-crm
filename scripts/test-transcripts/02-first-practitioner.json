@@ -1,0 +1,15 @@
+{
+  "id": "02-first-practitioner",
+  "description": "First-time practitioner interview — routed to Deal Flow app.",
+  "extractedEntity": {
+    "firstName": "Linda",
+    "lastName": "Chen",
+    "businessName": "Chen & Associates CPA",
+    "businessType": "practitioner",
+    "appType": "deal_flow",
+    "email": "linda@chencpa.com",
+    "phone": "415-555-9930"
+  },
+  "existing": { "people": [], "companies": [] },
+  "expectedDecision": "create_both"
+}

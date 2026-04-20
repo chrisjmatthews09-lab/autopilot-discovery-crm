@@ -1,0 +1,30 @@
+{
+  "id": "04-typo-name",
+  "description": "Typo scenario — Prompt A writes 'Jon Smyth' but existing record is 'John Smith'. Should still match via name+business + Levenshtein.",
+  "extractedEntity": {
+    "firstName": "Jon",
+    "lastName": "Smyth",
+    "businessName": "Acme Construction",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": null,
+    "phone": null
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-john",
+        "firstName": "John",
+        "lastName": "Smith",
+        "name": "John Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "john@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "review_person"
+}

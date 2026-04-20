@@ -1,0 +1,30 @@
+{
+  "id": "09-nickname",
+  "description": "Nickname scenario — Bob vs Robert. v1 matcher has no nickname dictionary, so this should route to review rather than auto-attach or miss entirely.",
+  "extractedEntity": {
+    "firstName": "Bob",
+    "lastName": "Smith",
+    "businessName": "Acme Construction",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": null,
+    "phone": null
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-robert",
+        "firstName": "Robert",
+        "lastName": "Smith",
+        "name": "Robert Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "robert@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "create_person_attach_company"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "05-second-person-same-business",
+  "description": "A different person at a business we already know about — create person, attach to existing company.",
+  "extractedEntity": {
+    "firstName": "Sarah",
+    "lastName": "Johnson",
+    "businessName": "Acme Construction",
+    "businessType": "business_owner",
+    "appType": "crm",
+    "email": "sarah@acmeconstruction.com",
+    "phone": "555-207-8811"
+  },
+  "existing": {
+    "people": [
+      {
+        "id": "p-john",
+        "firstName": "John",
+        "lastName": "Smith",
+        "name": "John Smith",
+        "businessName": "Acme Construction, LLC",
+        "email": "john@acmeconstruction.com",
+        "appType": "crm"
+      }
+    ],
+    "companies": [
+      { "id": "c-acme", "name": "Acme Construction, LLC", "appType": "crm" }
+    ]
+  },
+  "expectedDecision": "create_person_attach_company"
+}

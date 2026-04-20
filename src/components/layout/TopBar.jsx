@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { COLORS, TOPBAR_HEIGHT } from '../../config/design-tokens';
+import { WORKSPACES } from '../../config/workspaces';
 
 const LABELS = {
   '': 'Dashboard',
@@ -11,6 +12,19 @@ const LABELS = {
   insights: 'Insights',
   scripts: 'Scripts',
   settings: 'Settings',
+  practitioners: 'Practitioners',
+  firms: 'Firms',
+  targets: 'Targets',
+  referrals: 'Referral Partners',
+  pipeline: 'Pipeline',
+};
+
+// Workspace prefixes become a labelled + iconified header crumb so
+// "/crm" → "💼 CRM", "/deal-flow" → "🎯 Deal Flow" (bold, slightly
+// bigger than the workspace toggle in the sidebar).
+const WORKSPACE_BY_PREFIX = {
+  crm: WORKSPACES.crm,
+  'deal-flow': WORKSPACES.deal_flow,
 };
 
 function breadcrumbSegments(pathname) {
@@ -18,10 +32,15 @@ function breadcrumbSegments(pathname) {
   if (parts.length === 0) return [{ label: 'Dashboard', to: '/' }];
   const crumbs = [];
   let acc = '';
-  for (const part of parts) {
+  parts.forEach((part, idx) => {
     acc += '/' + part;
-    crumbs.push({ label: LABELS[part] || part, to: acc });
-  }
+    if (idx === 0 && WORKSPACE_BY_PREFIX[part]) {
+      const ws = WORKSPACE_BY_PREFIX[part];
+      crumbs.push({ label: ws.label, to: acc, icon: ws.icon, isWorkspace: true });
+    } else {
+      crumbs.push({ label: LABELS[part] || part, to: acc });
+    }
+  });
   return crumbs;
 }
 
@@ -42,16 +61,30 @@ export default function TopBar({ onOpenSearch, isProcessing = false, pendingCoun
         flexShrink: 0,
       }}
     >
-      <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: COLORS.textMuted, flex: 1, minWidth: 0 }}>
-        {crumbs.map((c, i) => (
-          <React.Fragment key={c.to}>
-            {i > 0 && <span style={{ color: COLORS.borderDark }}>/</span>}
-            <Link to={c.to}
-              style={{ color: i === crumbs.length - 1 ? COLORS.text : COLORS.textMuted, textDecoration: 'none', fontWeight: i === crumbs.length - 1 ? 600 : 400, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
-              {c.label}
-            </Link>
-          </React.Fragment>
-        ))}
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: COLORS.textMuted, flex: 1, minWidth: 0 }}>
+        {crumbs.map((c, i) => {
+          const isLast = i === crumbs.length - 1;
+          return (
+            <React.Fragment key={c.to}>
+              {i > 0 && <span style={{ color: COLORS.borderDark }}>/</span>}
+              <Link to={c.to}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: c.isWorkspace ? 6 : 0,
+                  color: isLast ? COLORS.text : COLORS.textMuted,
+                  textDecoration: 'none',
+                  fontWeight: c.isWorkspace ? 700 : (isLast ? 600 : 400),
+                  fontSize: c.isWorkspace ? 15 : 13,
+                  textTransform: c.isWorkspace ? 'none' : 'capitalize',
+                  whiteSpace: 'nowrap',
+                }}>
+                {c.icon && <span style={{ fontSize: 16 }}>{c.icon}</span>}
+                <span>{c.label}</span>
+              </Link>
+            </React.Fragment>
+          );
+        })}
       </nav>
 
       <IngestionStatus

@@ -1008,7 +1008,7 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
             contacts={companyContacts}
             interviews={allInterviews || []}
             interactions={allInteractions || []}
-            workspaceId={row.workspace}
+            workspaceId={row.workspace || workspace}
           />
         )}
 
@@ -2384,7 +2384,7 @@ function MainApp({ user, onSignOut }) {
       <Route path="/themes" element={<Navigate to="/deal-flow/insights" replace />} />
       <Route path="/scripts" element={<Navigate to="/deal-flow/scripts" replace />} />
       <Route path="/scripts/pro" element={<Navigate to="/deal-flow/scripts" replace />} />
-      <Route path="/scripts/biz" element={<Navigate to="/deal-flow/scripts" replace />} />
+      <Route path="/scripts/biz" element={<Navigate to="/crm/scripts" replace />} />
 
       {/* ───── CRM workspace ───── */}
       <Route path="/crm" element={
@@ -2463,7 +2463,8 @@ function MainApp({ user, onSignOut }) {
         <ReferralPipeline firms={firms} loading={loading} onUpdateCompany={handleUpdateCompany} />
       } />
       <Route path="/deal-flow/insights" element={<ThemesPage businesses={companiesCrm} practitioners={peopleDf} />} />
-      <Route path="/deal-flow/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} />} />
+      <Route path="/deal-flow/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} workspace="deal_flow" />} />
+      <Route path="/crm/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} workspace="crm" />} />
 
       {/* ───── Global ───── */}
       <Route path="/review" element={<DedupReviewQueue />} />

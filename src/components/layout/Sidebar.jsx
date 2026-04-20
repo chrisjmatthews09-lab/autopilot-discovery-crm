@@ -28,6 +28,7 @@ const SECTIONS_CRM = [
       { to: '/crm/deals', label: 'Deals', icon: '💼' },
       { to: '/crm/board', label: 'Board', icon: '📊' },
       { to: '/crm/interviews', label: 'Interviews', icon: '🎙️' },
+      { to: '/crm/scripts', label: 'Scripts', icon: '📝' },
       { to: '/review', label: 'Review queue', icon: '🕵️', badgeKey: 'reviewCrm', badgeTone: 'warning' },
     ],
   },

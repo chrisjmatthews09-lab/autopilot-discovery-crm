@@ -2,6 +2,8 @@
 // so the user can read it without leaving the Contact detail page.
 
 import React, { useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { COLORS } from '../config/design-tokens';
 import {
   getInterviewTranscript,
@@ -65,9 +67,27 @@ export default function TranscriptModal({ interview, mode = 'transcript', onClos
         </div>
         <div style={{ padding: 20, overflow: 'auto', flex: 1 }}>
           {text ? (
-            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.6, margin: 0, color: COLORS.text }}>
-              {text}
-            </pre>
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: COLORS.text }}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: (p) => <h1 style={{ fontSize: 20, fontWeight: 700, marginTop: 18, marginBottom: 8 }} {...p} />,
+                  h2: (p) => <h2 style={{ fontSize: 17, fontWeight: 700, marginTop: 18, marginBottom: 8, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 4 }} {...p} />,
+                  h3: (p) => <h3 style={{ fontSize: 15, fontWeight: 700, marginTop: 14, marginBottom: 6 }} {...p} />,
+                  h4: (p) => <h4 style={{ fontSize: 14, fontWeight: 600, marginTop: 10, marginBottom: 4 }} {...p} />,
+                  p:  (p) => <p style={{ margin: '6px 0' }} {...p} />,
+                  ul: (p) => <ul style={{ margin: '6px 0', paddingLeft: 22 }} {...p} />,
+                  ol: (p) => <ol style={{ margin: '6px 0', paddingLeft: 22 }} {...p} />,
+                  li: (p) => <li style={{ margin: '3px 0' }} {...p} />,
+                  strong: (p) => <strong style={{ fontWeight: 700 }} {...p} />,
+                  blockquote: (p) => <blockquote style={{ margin: '8px 0', padding: '4px 12px', borderLeft: `3px solid ${COLORS.border}`, color: COLORS.textMuted, fontStyle: 'italic' }} {...p} />,
+                  code: (p) => <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 12, background: COLORS.cardAlt, padding: '1px 5px', borderRadius: 3 }} {...p} />,
+                  a: (p) => <a style={{ color: COLORS.primary }} target="_blank" rel="noreferrer" {...p} />,
+                }}
+              >
+                {text}
+              </ReactMarkdown>
+            </div>
           ) : url ? (
             <div style={{ fontSize: 13, color: COLORS.textMuted }}>
               No cached {title.toLowerCase()} yet. <a href={url} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Open source ↗</a>

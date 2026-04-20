@@ -145,9 +145,14 @@ export function planResolution(extractedEntity, people, companies) {
 // Plan execution — translates a plan into Firestore writes
 // ────────────────────────────────────────────────────────────────────────────
 
+function workspaceFromEntity(entity) {
+  return entity?.appType === 'crm' ? 'crm' : 'deal_flow';
+}
+
 function newPersonDocFromEntity(entity, companyId) {
   const fullName = buildFullName(entity.firstName, entity.lastName);
   return {
+    workspace: workspaceFromEntity(entity),
     firstName: entity.firstName || null,
     lastName: entity.lastName || null,
     name: fullName,
@@ -171,6 +176,7 @@ function newPersonDocFromEntity(entity, companyId) {
 
 function newCompanyDocFromEntity(entity) {
   return {
+    workspace: workspaceFromEntity(entity),
     name: entity.businessName || null,
     nameNormalized: normalizeBusinessName(entity.businessName || ''),
     sourceType: 'interview_ingestion',
@@ -212,12 +218,26 @@ export async function executePlan(plan, interviewId, jobId, log = () => {}) {
       const nextInterviewIds = Array.from(
         new Set([...(person.interviewIds || []), interviewId]),
       );
+      const personPatch = { interviewIds: nextInterviewIds };
+      const targetWorkspace = workspaceFromEntity(plan.extractedEntity);
+      if (!person.workspace) personPatch.workspace = targetWorkspace;
       ops.push({
         type: 'update',
         collection: 'people',
         id: person.id,
-        data: { interviewIds: nextInterviewIds },
+        data: personPatch,
       });
+      if (person.company_id) {
+        const matchedCompany = (await getDoc('companies', person.company_id).catch(() => null));
+        if (matchedCompany && !matchedCompany.workspace) {
+          ops.push({
+            type: 'update',
+            collection: 'companies',
+            id: person.company_id,
+            data: { workspace: targetWorkspace },
+          });
+        }
+      }
       result.matchedContactId = person.id;
       result.matchedBusinessId = person.company_id || null;
       result.method = 'auto_merged';
@@ -265,11 +285,13 @@ export async function executePlan(plan, interviewId, jobId, log = () => {}) {
       const nextContactIds = Array.from(
         new Set([...(plan.company.contactIds || []), personId]),
       );
+      const companyPatch = { contactIds: nextContactIds };
+      if (!plan.company.workspace) companyPatch.workspace = workspaceFromEntity(plan.extractedEntity);
       ops.push({
         type: 'update',
         collection: 'companies',
         id: companyId,
-        data: { contactIds: nextContactIds },
+        data: companyPatch,
       });
       result.matchedContactId = personId;
       result.matchedBusinessId = companyId;
@@ -342,6 +364,7 @@ export async function executePlan(plan, interviewId, jobId, log = () => {}) {
   }
 
   const interviewPatch = {
+    workspace: workspaceFromEntity(plan.extractedEntity),
     extractedEntity: plan.extractedEntity || null,
     dedupResolution: {
       method: result.method,

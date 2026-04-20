@@ -2,6 +2,9 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // All user data is scoped under users/{uid}/... — any collection added here
+    // (people, companies, interviews, dedupReviewQueue, etc.) is automatically
+    // read/write restricted to the authenticated owner.
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }

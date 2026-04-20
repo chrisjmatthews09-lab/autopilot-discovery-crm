@@ -6,15 +6,50 @@ import { useAuth } from './hooks/useAuth';
 import { useCollection } from './hooks/useCollection';
 import { useWindowWidth } from './hooks/useWindowWidth';
 import { createDoc, updateDoc, deleteDoc } from './data/firestore';
-import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed, migrateLifecycleStages, hasLifecycleMigrated } from './data/migrate';
+import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed, migrateLifecycleStages, hasLifecycleMigrated, seedScripts, hasScriptsSeeded, seedPipelines, hasPipelinesSeeded, seedTargetPipelines, hasTargetPipelinesSeeded, migrateWorkspaceBackfill, hasWorkspaceBackfilled } from './data/migrate';
+import { useWorkspace } from './hooks/useWorkspace';
+import { useIngestionProcessor } from './hooks/useIngestionProcessor.js';
+import { retryInterview, enrichAndMergeInterview } from './services/ingestionService.js';
+import { historyForField } from './lib/dedup/enrichmentMerge.js';
+import { FIRM_ROLES, personPath, companyPath, interviewPath, interviewsListPath } from './config/workspaces';
+import ReferralPartnersList from './pages/ReferralPartners';
+import ReferralPipeline from './pages/ReferralPipeline';
 import { LIFECYCLE_STAGES, INDUSTRIES, REVENUE_BANDS, ENTITY_TYPES, US_STATES } from './config/enums';
 import LifecycleStagePill from './components/ui/LifecycleStagePill';
+import { TagChips, TagPicker, RoleChips, RolePicker } from './components/ui/TagChips';
+import DedupeModal, { findDuplicatePerson, findDuplicateCompany } from './components/ui/DedupeModal';
+import CommandPalette from './components/ui/CommandPalette';
+import Timeline from './components/ui/Timeline';
+import TasksCard from './components/ui/TasksCard';
+import DealsCard from './components/ui/DealsCard';
+import TargetsCard from './components/ui/TargetsCard';
+import ConvertWizard from './components/ui/ConvertWizard';
+import LifecycleChangeModal from './components/ui/LifecycleChangeModal';
+import SaveViewModal from './components/ui/SaveViewModal';
+import ExportCSVButton from './components/ui/ExportCSVButton';
+import ImportCSVModal from './components/ui/ImportCSVModal';
+import GmailInbox from './components/ui/GmailInbox';
+import SuggestedInterviews from './components/ui/SuggestedInterviews';
+import { SkeletonTable } from './components/ui/Skeleton';
+import EmptyState from './components/ui/EmptyState';
+import { parseFilters, readFilter, encodeFiltersToSearch } from './data/views';
+import { useToast } from './components/ui/Toast';
+import { logInteraction } from './data/interactions';
+import { isValidTransition } from './config/enums';
+import Tasks from './pages/Tasks';
+import DealsList from './pages/DealsList';
+import DealDetail from './pages/DealDetail';
+import TargetsList from './pages/TargetsList';
+import TargetDetail from './pages/TargetDetail';
+import DataTable from './components/table/DataTable';
+import FilterBar from './components/table/FilterBar';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import MobileNav from './components/layout/MobileNav';
 import DashboardPage from './pages/Dashboard';
 import SettingsPageNew from './pages/Settings';
 import ScriptsWrapper from './pages/Scripts';
+import DedupReviewQueue from './pages/DedupReviewQueue';
 
 // ==================== CONSTANTS ====================
 const COLORS = {
@@ -45,143 +80,6 @@ const COLORS = {
 const FONT = `'Karla', 'Nunito Sans', sans-serif`;
 const DISPLAY = `'Fraunces', 'Playfair Display', serif`;
 
-// ==================== INTERVIEW SCRIPTS ====================
-const PRO_SCRIPT = {
-  title: "Bookkeeper / CPA / Accounting Firm Interview",
-  intro: "Thank you for taking the time. I'm researching the accounting services market in Colorado to understand how firms operate, what's working, what's not, and where the industry is heading. Everything you share is confidential and just for my own market research. This should take about 30–40 minutes.",
-  sections: [
-    {
-      name: "Warm-Up & Context",
-      color: COLORS.blue,
-      questions: [
-        { q: "Tell me about your firm — how long have you been operating, how many clients, what's your team look like?", why: "Establishes firm size, maturity, and capacity baseline" },
-        { q: "What types of clients make up the bulk of your revenue? Industries, size, service mix?", why: "Reveals vertical concentration and service line economics" },
-        { q: "What percentage of your revenue comes from tax prep vs. monthly/recurring services vs. advisory?", why: "Quantifies the tax-only vs. CAS revenue split — the core arbitrage" },
-      ]
-    },
-    {
-      name: "Service Delivery & Operations",
-      color: COLORS.primary,
-      questions: [
-        { q: "Walk me through how you onboard a new monthly bookkeeping or CAS client — what does that process look like from signed engagement letter to first deliverable?", why: "Maps the operational workflow and identifies bottlenecks" },
-        { q: "How many clients can one bookkeeper/accountant handle on your team? What's the realistic capacity?", why: "Critical for validating the 40-50 client per bookkeeper assumption with Digits" },
-        { q: "What's your tech stack? GL, bank feeds, bill pay, payroll, reporting — walk me through it.", why: "Identifies where Digits creates real differentiation vs. existing stacks" },
-        { q: "Where do things break down operationally? What takes longer than it should? Where do errors happen?", why: "Reveals pain points Digits automation could solve" },
-        { q: "How do you handle month-end close? How long does it typically take per client? When do clients get their financials?", why: "Benchmarks close speed — Digits promises real-time" },
-      ]
-    },
-    {
-      name: "Pricing & Economics",
-      color: COLORS.gold,
-      questions: [
-        { q: "How do you price your services? Hourly, fixed fee, tiered packages? Has that changed in the last few years?", why: "Maps pricing model trends across the market" },
-        { q: "What's your typical monthly fee range for a $1M–$5M revenue business? What about $5M–$10M?", why: "Direct pricing benchmark — compare to $1K/$2K/$3.5K tiers" },
-        { q: "Have you raised prices in the last 12 months? By how much? How did clients react?", why: "Tests price elasticity and validates the 80% fee-increase trend" },
-        { q: "What's your gross margin on bookkeeping vs. tax prep vs. advisory work? Which line is most profitable?", why: "Validates the margin thesis — advisory should be highest" },
-        { q: "What would you charge a construction company with $5M revenue, 3 entities, and job costing needs for full monthly CAS?", why: "Direct comp for Autopilot's construction-vertical pricing" },
-      ]
-    },
-    {
-      name: "Competition & Market",
-      color: COLORS.accent,
-      questions: [
-        { q: "Who do you lose deals to? What are the main reasons prospects choose someone else?", why: "Identifies real competitive threats and positioning gaps" },
-        { q: "What do you think about firms like Bench, Pilot, or other tech-enabled bookkeeping providers? Are they taking your clients?", why: "Gauges perception of tech-enabled competition" },
-        { q: "Have you looked at or used Digits? What's your take on AI-powered accounting platforms?", why: "Direct intelligence on Digits adoption and perception among practitioners" },
-        { q: "If someone offered to buy your firm, what multiple would you expect? What would make you consider selling?", why: "Critical M&A intelligence for the acquisition strategy" },
-        { q: "What's the biggest challenge facing your firm in the next 2–3 years?", why: "Surfaces macro threats — staffing shortage, AI disruption, margin compression" },
-      ]
-    },
-    {
-      name: "Staffing & Talent",
-      color: COLORS.purple,
-      questions: [
-        { q: "How hard is it to hire right now? What positions are hardest to fill? What are you paying?", why: "Validates the CPA shortage thesis and labor cost assumptions" },
-        { q: "How much of your team's time goes to manual data entry, categorization, and reconciliation vs. actual analysis and advisory?", why: "Quantifies the automation opportunity — the % Digits could eliminate" },
-        { q: "If AI could handle 90%+ of transaction categorization and reconciliation, how would that change your business?", why: "Tests receptivity to the Digits value prop from the practitioner side" },
-      ]
-    },
-    {
-      name: "Closing & Relationship",
-      color: COLORS.primary,
-      questions: [
-        { q: "If you could wave a magic wand and fix one thing about running your firm, what would it be?", why: "Often surfaces the deepest pain point" },
-        { q: "Do you refer clients to other firms for services you don't offer? What services?", why: "Identifies referral partnership opportunities" },
-        { q: "Would you be open to staying in touch? I may have opportunities for collaboration or referrals down the road.", why: "Builds the referral pipeline from Day 1" },
-      ]
-    },
-  ]
-};
-
-const BIZ_SCRIPT = {
-  title: "Business Owner Interview",
-  intro: "Thank you for your time. I'm researching how Colorado business owners handle their finances — the good, the bad, and the ugly. I want to understand what's working, what's painful, and what ideal financial support would look like. Everything is confidential. Should take about 25–30 minutes.",
-  sections: [
-    {
-      name: "Business Context",
-      color: COLORS.blue,
-      questions: [
-        { q: "Tell me about your business — what do you do, how long have you been operating, roughly how many employees?", why: "Establishes size, stage, and complexity" },
-        { q: "What's your approximate annual revenue range? (We can use buckets: under $1M, $1–3M, $3–5M, $5–10M, $10M+)", why: "Segments by revenue tier for pricing analysis" },
-        { q: "What industry would you say you're in? Do you have any industry-specific accounting needs?", why: "Maps vertical and surfaces specialized requirements (job costing, retainage, etc.)" },
-      ]
-    },
-    {
-      name: "Current Financial Operations",
-      color: COLORS.primary,
-      questions: [
-        { q: "Who handles your books today? In-house person, outside bookkeeper, CPA firm, you/spouse, or nobody?", why: "Maps the current provider landscape and identifies DIY owners" },
-        { q: "What accounting software do you use? QuickBooks, Xero, spreadsheets, shoeboxes?", why: "Identifies migration complexity and tech sophistication" },
-        { q: "How current are your books right now — like, today? When was your last complete monthly close?", why: "The key pain indicator. If books are >60 days behind, they're a strong prospect" },
-        { q: "How much are you paying for accounting/bookkeeping services right now? Monthly or annually?", why: "Establishes current spend baseline — critical for pricing validation" },
-        { q: "When was the last time you looked at a P&L or balance sheet and used it to make a business decision?", why: "Tests whether they use financials for decisions or just compliance" },
-      ]
-    },
-    {
-      name: "Pain Points (The Gold Mine)",
-      color: COLORS.accent,
-      questions: [
-        { q: "What's the most frustrating thing about managing your business finances right now?", why: "Open-ended — let them rant. The pain they volunteer first is the real pain." },
-        { q: "Have you ever missed a deduction, overpaid taxes, made a bad hiring/purchasing decision because you didn't have good financial data?", why: "Surfaces concrete $ cost of bad financial visibility" },
-        { q: "How much time per week do YOU personally spend on financial admin — invoicing, bills, reconciliation, payroll questions?", why: "Quantifies owner time displacement value" },
-        { q: "Has your bookkeeper or accountant ever made a significant mistake? What happened?", why: "Prior bad experience = pre-sold on quality" },
-        { q: "Do you feel confident you know your exact cash position, profitability by service/project, and financial runway right now?", why: "If the answer is no to any of these — they need help" },
-        { q: "Have you ever had a bank, bonding company, or lender ask for financials and you weren't ready?", why: "Compliance/banking pressure = high WTP signal" },
-      ]
-    },
-    {
-      name: "Value Proposition Testing",
-      color: COLORS.gold,
-      questions: [
-        { q: "If I could give you a dashboard on your phone showing your real-time P&L, cash flow, and key metrics — updated every day, not 30 days late — how valuable would that be?", why: "Tests the core Digits real-time visibility value prop" },
-        { q: "What would it be worth to you to never think about bookkeeping again — just have it done, accurately, every month?", why: "Tests the 'peace of mind' value prop — let them name a price" },
-        { q: "If someone could show you exactly where you're leaking money — unnecessary expenses, pricing mistakes, unprofitable jobs — would you pay for that insight?", why: "Tests advisory/controller-level value prop" },
-        { q: "Would you prefer a cheap basic bookkeeper, or would you pay more for someone who also gives you financial advice and strategy?", why: "Tests the CAS upsell — bookkeeping + advisory vs. bookkeeping alone" },
-        { q: "What's the most you'd be willing to pay per month for a service that gave you clean books, real-time dashboards, and a quarterly financial strategy review?", why: "Direct WTP testing — compare to $1K/$2K tier pricing" },
-      ]
-    },
-    {
-      name: "Decision-Making & Buying Signals",
-      color: COLORS.purple,
-      questions: [
-        { q: "If you were going to hire an accounting firm, what would matter most — price, industry expertise, technology, responsiveness, or something else?", why: "Identifies the primary buying criterion by segment" },
-        { q: "How would you find an accounting firm? Google? Referral? Industry group? Your attorney or banker?", why: "Maps actual acquisition channels — validates GTM strategy" },
-        { q: "Have you ever switched accounting providers? What made you switch? What was the biggest hesitation?", why: "Surfaces switching triggers and barriers" },
-        { q: "Would the word 'AI' in an accounting firm's pitch make you more interested, less interested, or not care?", why: "Tests AI messaging — critical for positioning" },
-        { q: "If a firm said 'we'll do a free financial health assessment of your books,' would you take that meeting?", why: "Validates the Digits Health Score as a lead gen mechanism" },
-      ]
-    },
-    {
-      name: "Closing",
-      color: COLORS.primary,
-      questions: [
-        { q: "If you could have one thing about your business finances magically fixed overnight, what would it be?", why: "The magic wand question — pure gold for messaging" },
-        { q: "Is there anything about how your finances are managed that keeps you up at night?", why: "Emotional anchor — identifies the deepest concern" },
-        { q: "Would you be open to me following up if I build something that addresses the issues you described?", why: "Pipeline development — warm lead capture" },
-      ]
-    },
-  ]
-};
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz89C4C15E1Cxmux8bWUWw04pghxiGlqkfb2Ulr_8FMZdnIZ9vcNEakdrGo3zNLhAZV/exec';
 
@@ -354,6 +252,7 @@ const V2_SCHEMA = {
       { key: 'monthsBehind', label: 'Months Behind on Books' },
       { key: 'currentSpend', label: 'Current Annual Accounting Spend' },
       { key: 'leadScore', label: 'Lead Score (1-10)' },
+      { key: 'parent_company_id', label: 'Parent Company ID' },
     ],
     richFields: ['painPoints', 'wtpSignals', 'quotableLines', 'known_pricing_signals'],
     statusOptions: ['new', 'contacted', 'interested', 'hired', 'declined'],
@@ -362,17 +261,57 @@ const V2_SCHEMA = {
 };
 
 // ==================== V2 CONTACT PAGE ====================
-function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading }) {
+function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading, workspace = 'crm' }) {
   const cfg = V2_SCHEMA[kind];
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const editParam = searchParams.get('edit');
+  const viewParam = searchParams.get('view');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [filter, setFilter] = useState('');
+  const [filter, setFilter] = useState(() => readFilter(searchParams, 'q') || '');
+  const [stageFilter, setStageFilter] = useState(() => readFilter(searchParams, 'stages', { asArray: true }) || []);
+  const [tagFilter, setTagFilter] = useState(() => readFilter(searchParams, 'tags', { asArray: true }) || []);
+  const [showArchived, setShowArchived] = useState(() => !!readFilter(searchParams, 'archived', { asBool: true }));
   const [saveStatus, setSaveStatus] = useState('idle');
-  const emptyForm = { status: 'new' };
+  const [dedupe, setDedupe] = useState(null);
+  const [lifecycleGate, setLifecycleGate] = useState(null);
+  const emptyForm = { status: 'new', lifecycle_stage: 'Research-Contact', tag_ids: [] };
   const [formData, setFormData] = useState(emptyForm);
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  const { data: tags } = useCollection('tags');
+  const { data: savedViews } = useCollection('views');
+  const toast = useToast();
+  const kindObjectType = kind; // 'person' or 'company'
+
+  // Hydrate filters when a saved view is selected via ?view=id
+  useEffect(() => {
+    if (!viewParam || !savedViews || savedViews.length === 0) return;
+    const v = savedViews.find((sv) => sv.id === viewParam);
+    if (!v || v.object_type !== kindObjectType) return;
+    const f = parseFilters(v);
+    setFilter(f.q || '');
+    setStageFilter(f.stages || []);
+    setTagFilter(f.tags || []);
+    setShowArchived(!!f.archived);
+    // Strip the view param so subsequent filter edits write clean URLs.
+    const next = new URLSearchParams(searchParams);
+    next.delete('view');
+    setSearchParams(next, { replace: true });
+  }, [viewParam, savedViews, kindObjectType]);
+
+  // Sync filters back to the URL so saved views round-trip cleanly.
+  useEffect(() => {
+    const filters = { q: filter, stages: stageFilter, tags: tagFilter, archived: showArchived };
+    const qs = encodeFiltersToSearch(filters);
+    const next = new URLSearchParams(qs);
+    // Preserve non-filter params (edit, etc.)
+    const edit = searchParams.get('edit');
+    if (edit) next.set('edit', edit);
+    setSearchParams(next, { replace: true });
+  }, [filter, stageFilter, tagFilter, showArchived]);
 
   useEffect(() => {
     if (!editParam) return;
@@ -385,83 +324,209 @@ function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, 
     }
   }, [editParam, rows]);
 
+  // ⌘-N shortcut lands here with ?new=1 — open the create form.
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setFormData(emptyForm);
+      setEditingId(null);
+      setShowForm(true);
+      const next = new URLSearchParams(searchParams); next.delete('new');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams]);
+
   const filtered = rows.filter((r) => {
-    if (!filter) return true;
-    const q = filter.toLowerCase();
-    return [r.name, r.company, r.industry, r.location]
-      .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+    if (!showArchived && r.is_archived) return false;
+    if (stageFilter.length > 0 && !stageFilter.includes(r.lifecycle_stage || 'Research-Contact')) return false;
+    if (tagFilter.length > 0) {
+      const rowTags = r.tag_ids || [];
+      if (!tagFilter.some((t) => rowTags.includes(t))) return false;
+    }
+    if (filter) {
+      const q = filter.toLowerCase();
+      const matched = [r.name, r.company, r.email, r.industry, r.location]
+        .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+      if (!matched) return false;
+    }
+    return true;
   });
 
-  const openNew = () => { setFormData({ status: 'new' }); setEditingId(null); setShowForm(true); };
-  const openEdit = (row) => { setFormData(row); setEditingId(row.id); setShowForm(true); };
-  const resetForm = () => { setFormData(emptyForm); setEditingId(null); setShowForm(false); };
+  const openNew = () => { setFormData(emptyForm); setEditingId(null); setShowForm(true); };
+  const openEdit = (row) => { setFormData({ ...emptyForm, ...row }); setEditingId(row.id); setShowForm(true); };
+  const resetForm = () => { setFormData(emptyForm); setEditingId(null); setShowForm(false); setSaveStatus('idle'); };
+
+  const doSave = async (override) => {
+    setSaveStatus('saving');
+    const payload = { ...(override || formData), id: editingId || `${cfg.idPrefix}-${Date.now()}` };
+    const ok = await onUpsert(payload);
+    if (ok) { setSaveStatus('success'); setTimeout(() => { resetForm(); }, 1000); }
+    else { setSaveStatus('error'); setTimeout(() => setSaveStatus('idle'), 2500); }
+  };
 
   const handleSave = async () => {
     if (saveStatus === 'saving') return;
     const missing = cfg.coreFields.filter((f) => f.required && !formData[f.key]).map((f) => f.label);
     if (missing.length) { alert('Required: ' + missing.join(', ')); return; }
-    setSaveStatus('saving');
-    const ok = await onUpsert({ ...formData, id: editingId || `${cfg.idPrefix}-${Date.now()}` });
-    if (ok) { setSaveStatus('success'); setTimeout(() => { resetForm(); setSaveStatus('idle'); }, 1200); }
-    else { setSaveStatus('error'); setTimeout(() => setSaveStatus('idle'), 2500); }
+
+    if (!editingId) {
+      const dup = kind === 'person'
+        ? findDuplicatePerson(rows, { email: formData.email, name: formData.name, company: formData.company })
+        : findDuplicateCompany(rows, { domain: formData.domain || formData.website, name: formData.name });
+      if (dup) { setDedupe(dup); return; }
+    }
+
+    if (editingId) {
+      const prev = rows.find((r) => r.id === editingId);
+      const from = prev?.lifecycle_stage;
+      const to = formData.lifecycle_stage;
+      if (from && to && from !== to && !isValidTransition(from, to)) {
+        setLifecycleGate({ from, to });
+        return;
+      }
+    }
+
+    doSave();
   };
+
+  const columns = [
+    { key: 'name', header: 'Name', width: '1.4fr', render: (r) => (
+      <span style={{ fontWeight: 600, color: COLORS.text }}>
+        {r.name || <span style={{ color: COLORS.textDim, fontStyle: 'italic', fontWeight: 400 }}>(no name)</span>}
+      </span>
+    )},
+    { key: cfg.orgField, header: cfg.orgLabel, width: '1.4fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</span> },
+    { key: 'industry', header: 'Industry', width: '1fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.industry || '—'}</span> },
+    { key: 'revenue', header: kind === 'person' ? 'Firm size' : 'Revenue', width: '0.9fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{kind === 'person' ? (r.firmSize || '—') : (r.revenue_band || r.revenue || '—')}</span> },
+    { key: 'lifecycle_stage', header: 'Stage', width: '0.9fr', render: (r) => r.lifecycle_stage ? <LifecycleStagePill stage={r.lifecycle_stage} /> : <StatusPill status={r.status} /> },
+    ...(kind === 'company' && workspace === 'deal_flow' ? [
+      { key: 'roles', header: 'Roles', width: '1.1fr', render: (r) => <RoleChips roles={r.roles} /> },
+    ] : []),
+    { key: 'tags', header: 'Tags', width: '1fr', render: (r) => <TagChips ids={r.tag_ids} tags={tags} /> },
+    { key: 'actions', header: '', width: '0.6fr', align: 'right', render: (r) => (
+      <span onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
+        <button onClick={() => window.confirm(`Delete ${r.name}?`) && onDelete(r.id)} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
+      </span>
+    )},
+  ];
 
   return (
     <div style={{ padding: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ color: COLORS.text, margin: 0 }}>
-          {cfg.icon} {cfg.label} <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({rows.length})</span>
+          {cfg.icon} {cfg.label} <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({filtered.length}{filtered.length !== rows.length && ` of ${rows.length}`})</span>
         </h2>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <input type="text" placeholder={`Search ${cfg.label.toLowerCase()}…`} value={filter} onChange={(e) => setFilter(e.target.value)}
-            style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }} />
-          <button onClick={() => (showForm ? resetForm() : openNew())}
-            style={{ padding: '8px 16px', backgroundColor: showForm ? COLORS.border : COLORS.primary, color: showForm ? COLORS.text : '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
-            {showForm ? 'Cancel' : `+ Add ${cfg.singular}`}
-          </button>
-        </div>
+        <button onClick={() => (showForm ? resetForm() : openNew())}
+          style={{ padding: '8px 16px', backgroundColor: showForm ? COLORS.border : COLORS.primary, color: showForm ? COLORS.text : '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+          {showForm ? 'Cancel' : `+ New ${cfg.singular}`}
+        </button>
       </div>
 
+      <FilterBar
+        search={filter}
+        onSearchChange={setFilter}
+        searchPlaceholder={`Search ${cfg.label.toLowerCase()}…`}
+        multiSelects={[
+          { key: 'stage', label: 'Lifecycle', options: LIFECYCLE_STAGES, value: stageFilter, onChange: setStageFilter },
+          { key: 'tags', label: 'Tags', options: tags.map((t) => ({ value: t.id, label: t.label, color: t.color })), value: tagFilter, onChange: setTagFilter,
+            renderOption: (opt) => <span style={{ background: opt.color, color: '#fff', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>{opt.label}</span> },
+        ]}
+        toggles={[
+          { key: 'archived', label: 'Show archived', value: showArchived, onChange: setShowArchived },
+        ]}
+        rightSlot={
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button onClick={() => setSaveViewOpen(true)}
+              style={{ padding: '7px 12px', background: COLORS.cardAlt, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+              💾 Save view
+            </button>
+            <ExportCSVButton rows={filtered} columns={columns} filename={`${cfg.label.toLowerCase()}-export`} />
+            <button onClick={() => setImportOpen(true)}
+              style={{ padding: '7px 12px', background: COLORS.cardAlt, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+              ⬆ Import CSV
+            </button>
+          </div>
+        }
+      />
+
       {showForm && (
-        <div style={{ backgroundColor: COLORS.card, padding: 20, borderRadius: 8, marginBottom: 20, border: `1px solid ${COLORS.border}` }}>
+        <div style={{ backgroundColor: COLORS.card, padding: 20, borderRadius: 8, marginBottom: 16, border: `1px solid ${COLORS.border}` }}>
           <h3 style={{ marginTop: 0, color: COLORS.text }}>{editingId ? `Edit ${cfg.singular}` : `New ${cfg.singular}`}</h3>
-          <V2Form cfg={cfg} formData={formData} setFormData={setFormData} onSave={handleSave} onCancel={resetForm} saveStatus={saveStatus} isEditing={!!editingId} />
+          <V2Form cfg={cfg} formData={formData} setFormData={setFormData} onSave={handleSave} onCancel={resetForm} saveStatus={saveStatus} isEditing={!!editingId} tags={tags} kind={kind} workspace={workspace} />
         </div>
       )}
 
-      {filtered.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
-          {rows.length === 0
-            ? `No ${cfg.label.toLowerCase()} yet. They appear automatically after Zapier sends an interview.`
-            : `No ${cfg.label.toLowerCase()} match "${filter}".`}
-        </div>
+      {loading && rows.length === 0 ? (
+        <SkeletonTable rows={8} cols={6} />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon={cfg.icon}
+          title={`No ${cfg.label.toLowerCase()} yet`}
+          body={`Create your first ${cfg.singular.toLowerCase()} or import a CSV to get started.`}
+          primaryAction={{ label: `+ New ${cfg.singular}`, onClick: () => openNew() }}
+          secondaryAction={{ label: '⬆ Import CSV', onClick: () => setImportOpen(true) }}
+        />
       ) : (
-        <div style={{ backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
-            <div>Name</div><div>{cfg.orgLabel}</div><div>Industry</div><div>Revenue / Size</div><div>Status</div><div style={{ textAlign: 'right' }}>Actions</div>
-          </div>
-          {filtered.map((r) => (
-            <div key={r.id} onClick={() => navigate(`${basePath}/${r.id}`)}
-              style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 1.1fr 0.9fr 0.7fr 0.8fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
-              <div style={{ fontWeight: 600, color: COLORS.text }}>
-                {r.name || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(no name)</span>}
-                {r.enrichedAt && <span style={{ marginLeft: 6, fontSize: 10, color: COLORS.success }}>✨</span>}
-              </div>
-              <div style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</div>
-              <div style={{ color: COLORS.textMuted }}>{r.industry || '—'}</div>
-              <div style={{ color: COLORS.textMuted }}>{kind === 'person' ? (r.firmSize || '—') : (r.revenue || '—')}</div>
-              <div>{r.lifecycle_stage ? <LifecycleStagePill stage={r.lifecycle_stage} /> : <StatusPill status={r.status} />}</div>
-              <div style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
-                <button onClick={() => window.confirm(`Delete ${r.name}?`) && onDelete(r.id)} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <DataTable
+          columns={columns}
+          rows={filtered}
+          onRowClick={(r) => navigate(`${basePath}/${r.id}`)}
+          emptyMessage={`No ${cfg.label.toLowerCase()} match the current filters.`}
+        />
       )}
-      {loading && <div style={{ textAlign: 'center', padding: 16, color: COLORS.textDim }}>Loading…</div>}
+
+      <DedupeModal
+        open={!!dedupe}
+        existing={dedupe && dedupe.existing}
+        match={dedupe && dedupe.match}
+        onCancel={() => setDedupe(null)}
+        onCreateAnyway={() => { const d = dedupe; setDedupe(null); doSave(); }}
+        onViewExisting={() => { const id = dedupe.existing.id; setDedupe(null); resetForm(); navigate(`${basePath}/${id}`); }}
+      />
+
+      {lifecycleGate && (
+        <LifecycleChangeModal
+          fromStage={lifecycleGate.from}
+          toStage={lifecycleGate.to}
+          onCancel={() => setLifecycleGate(null)}
+          onConfirm={async (reason) => {
+            const override = { ...formData, lifecycle_change_reason: reason };
+            setLifecycleGate(null);
+            logInteraction({
+              kind: 'stage_change',
+              entity_type: kind,
+              entity_id: editingId,
+              title: `Backward move — ${lifecycleGate.from} → ${lifecycleGate.to}`,
+              body: reason,
+              from_stage: lifecycleGate.from,
+              to_stage: lifecycleGate.to,
+              meta: { backward: true },
+            }).catch(() => {});
+            doSave(override);
+          }}
+        />
+      )}
+
+      <SaveViewModal
+        open={saveViewOpen}
+        onClose={() => setSaveViewOpen(false)}
+        objectType={kindObjectType}
+        filters={{ q: filter, stages: stageFilter, tags: tagFilter, archived: showArchived }}
+        onSaved={() => toast && toast.success && toast.success('View pinned to sidebar.')}
+      />
+
+      <ImportCSVModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        kind={kind}
+        collectionName={kind === 'person' ? 'people' : 'companies'}
+        targetFields={cfg.importFields || [...cfg.coreFields, ...cfg.firmFields]}
+        existingRows={rows}
+        dedupeFn={kind === 'person' ? findDuplicatePerson : findDuplicateCompany}
+        idPrefix={cfg.idPrefix}
+        defaultValues={{ status: 'new', lifecycle_stage: 'Research-Contact' }}
+        onDone={(r) => { toast && toast.success && toast.success(`Imported ${r.inserted} ${cfg.label.toLowerCase()} (skipped ${r.skipped}).`); }}
+      />
     </div>
   );
 }
@@ -482,7 +547,135 @@ function StatusPill({ status }) {
   return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, backgroundColor: c.bg, color: c.fg, textTransform: 'capitalize' }}>{s}</span>;
 }
 
-function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEditing }) {
+function DedupResolutionPanel({ interview, people, companies }) {
+  const navigate = useNavigate();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichStatus, setEnrichStatus] = useState(null);
+  const status = interview?.dedupStatus;
+  if (!status) return null;
+  if (status === 'resolved' && !interview.dedupResolution) return null;
+
+  const resolution = interview.dedupResolution || null;
+  const matchedContact = resolution?.matchedContactId ? people.find((p) => p.id === resolution.matchedContactId) : null;
+  const matchedCompany = resolution?.matchedBusinessId ? companies.find((c) => c.id === resolution.matchedBusinessId) : null;
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await retryInterview(interview.id);
+    } catch (err) {
+      setRetryError(err?.message || String(err));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleReEnrich = async () => {
+    setEnriching(true);
+    setEnrichStatus(null);
+    try {
+      const out = await enrichAndMergeInterview(interview);
+      if (out?.error) {
+        setEnrichStatus({ ok: false, msg: `Enrichment failed: ${out.error}` });
+      } else if (out?.skipped) {
+        setEnrichStatus({ ok: false, msg: `Skipped: ${out.skipped}` });
+      } else {
+        const personN = out?.changed?.person?.length || 0;
+        const companyN = out?.changed?.company?.length || 0;
+        setEnrichStatus({ ok: true, msg: `✓ Enrichment complete — person ${personN}, company ${companyN} field${personN + companyN === 1 ? '' : 's'} updated` });
+      }
+    } catch (err) {
+      setEnrichStatus({ ok: false, msg: `Enrichment failed: ${err?.message || String(err)}` });
+    } finally {
+      setEnriching(false);
+    }
+  };
+
+  const tone =
+    status === 'error' ? { bg: '#FCE8E8', border: '#FCA5A5', fg: COLORS.danger }
+    : status === 'review' ? { bg: '#FFEDD5', border: '#FDBA74', fg: '#9A3412' }
+    : status === 'resolved' ? { bg: '#E8F5EE', border: '#A7F3D0', fg: '#1A5C3A' }
+    : { bg: COLORS.cardAlt, border: COLORS.border, fg: COLORS.textMuted };
+
+  return (
+    <div style={{ marginTop: 10, padding: 12, borderRadius: 8, background: tone.bg, border: `1px solid ${tone.border}`, fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, color: tone.fg }}>Dedup: {status === 'resolved' ? 'Resolved' : status === 'review' ? 'Awaiting review' : status === 'error' ? 'Processing error' : status === 'processing' ? 'Processing…' : 'Pending'}</span>
+        {status === 'resolved' && resolution && (
+          <>
+            <span style={{ color: COLORS.textMuted }}>
+              {resolution.method === 'auto_merged' ? 'auto-merged'
+                : resolution.method === 'created_new' ? 'created new'
+                : resolution.method === 'user_resolved' ? 'user-resolved' : resolution.method}
+              {typeof resolution.confidenceScore === 'number' ? ` · ${Math.round(resolution.confidenceScore)}% confidence` : ''}
+            </span>
+            {matchedContact && (
+              <button onClick={() => navigate(personPath(matchedContact))}
+                style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 600, textDecoration: 'underline' }}>
+                → {matchedContact.name || '(person)'}
+              </button>
+            )}
+            {matchedCompany && (
+              <button onClick={() => navigate(companyPath(matchedCompany))}
+                style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 600, textDecoration: 'underline' }}>
+                → {matchedCompany.name || '(company)'}
+              </button>
+            )}
+            {resolution.matchedContactId && (
+              <button onClick={handleReEnrich} disabled={enriching}
+                style={{ marginLeft: 'auto', padding: '4px 10px', background: enriching ? COLORS.border : COLORS.primary, color: '#fff', border: 'none', borderRadius: 4, cursor: enriching ? 'default' : 'pointer', fontSize: 11, fontWeight: 700 }}>
+                {enriching ? 'Enriching…' : '✨ Re-run enrichment'}
+              </button>
+            )}
+          </>
+        )}
+        {status === 'review' && (
+          <button onClick={() => navigate('/review')}
+            style={{ marginLeft: 'auto', padding: '4px 10px', background: COLORS.warning, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+            Open review queue
+          </button>
+        )}
+        {status === 'error' && (
+          <button onClick={handleRetry} disabled={retrying}
+            style={{ marginLeft: 'auto', padding: '4px 10px', background: retrying ? COLORS.border : COLORS.danger, color: '#fff', border: 'none', borderRadius: 4, cursor: retrying ? 'default' : 'pointer', fontSize: 11, fontWeight: 700 }}>
+            {retrying ? 'Retrying…' : '↻ Retry ingestion'}
+          </button>
+        )}
+      </div>
+      {status === 'error' && interview.processingError && (
+        <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}>
+          {interview.processingError}
+        </div>
+      )}
+      {retryError && <div style={{ marginTop: 6, color: COLORS.danger, fontSize: 12 }}>Retry failed: {retryError}</div>}
+      {enrichStatus && <div style={{ marginTop: 6, color: enrichStatus.ok ? COLORS.success : COLORS.danger, fontSize: 12 }}>{enrichStatus.msg}</div>}
+    </div>
+  );
+}
+
+function DedupStatusPill({ status }) {
+  if (!status || status === 'resolved') return null;
+  const config = {
+    pending:    { bg: '#FBF6E8', fg: '#9A7B2C', label: 'Pending' },
+    processing: { bg: '#EBF3FC', fg: '#2563A0', label: 'Processing' },
+    review:     { bg: '#FFEDD5', fg: '#C2410C', label: 'Needs review' },
+    error:      { bg: '#FCE8E8', fg: '#DC2626', label: 'Error' },
+  }[status];
+  if (!config) return null;
+  return (
+    <span
+      title={`Dedup: ${status}`}
+      style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 700, backgroundColor: config.bg, color: config.fg, marginLeft: 6 }}
+    >
+      {config.label}
+    </span>
+  );
+}
+
+function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEditing, tags = [], kind, workspace = 'crm' }) {
   const isSaving = saveStatus === 'saving';
   const isSuccess = saveStatus === 'success';
   const isError = saveStatus === 'error';
@@ -524,6 +717,16 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
           <input type="date" value={formData.interviewDate || ''} onChange={(e) => updateField('interviewDate', e.target.value)} style={inputStyle} />
         </div>
       </div>
+      {kind === 'company' && workspace === 'deal_flow' && (
+        <div style={{ marginTop: 14 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3, display: 'block', marginBottom: 6 }}>Roles</label>
+          <RolePicker selected={formData.roles || []} onChange={(roles) => updateField('roles', roles)} />
+        </div>
+      )}
+      <div style={{ marginTop: 14 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3, display: 'block', marginBottom: 6 }}>Tags</label>
+        <TagPicker tags={tags} selectedIds={formData.tag_ids || []} onChange={(ids) => updateField('tag_ids', ids)} scope={kind} />
+      </div>
       <div style={{ marginTop: 14 }}>
         <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: 0.3 }}>Notes</label>
         <textarea value={formData.notes || ''} onChange={(e) => updateField('notes', e.target.value)} style={{ ...inputStyle, width: '100%', minHeight: 80, marginTop: 4 }} />
@@ -542,12 +745,97 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
 }
 
 // ==================== CONTACT DETAIL VIEW ====================
-function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEnrich }) {
+function formatActionLabel(action) {
+  switch (action) {
+    case 'filled': return 'filled';
+    case 'overwrote': return 'overwrote';
+    case 'unioned': return 'merged items';
+    case 'suppressed_low_confidence': return 'suppressed (low confidence)';
+    case 'suppressed_existing_higher': return 'suppressed (existing higher)';
+    default: return action;
+  }
+}
+
+function formatMergeValue(v) {
+  if (v == null) return '—';
+  if (Array.isArray(v)) return v.length > 0 ? `[${v.slice(0, 5).join(', ')}${v.length > 5 ? `, +${v.length - 5}` : ''}]` : '[]';
+  if (typeof v === 'object') return JSON.stringify(v).slice(0, 80);
+  const s = String(v);
+  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+}
+
+function EnrichmentFieldClock({ history, field }) {
+  const [open, setOpen] = useState(false);
+  const entries = historyForField(history, field);
+  if (!entries.length) return null;
+  return (
+    <span style={{ position: 'relative', display: 'inline-block', marginLeft: 6 }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        title={`${entries.length} enrichment event${entries.length === 1 ? '' : 's'} for ${field}`}
+        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: COLORS.textMuted }}>
+        🕑
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50, minWidth: 280, maxWidth: 420, padding: 10, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.12)', fontSize: 11, color: COLORS.text }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>History · {field}</div>
+          {entries.slice().reverse().map((e, i) => (
+            <div key={i} style={{ padding: '6px 0', borderTop: i === 0 ? 'none' : `1px solid ${COLORS.border}` }}>
+              <div style={{ color: COLORS.textMuted, fontSize: 10 }}>{e.at ? new Date(e.at).toLocaleString() : '—'}</div>
+              <div><strong>{formatActionLabel(e.action)}</strong>{typeof e.incomingConfidence === 'number' ? ` · conf ${e.incomingConfidence}` : ''}{typeof e.existingConfidence === 'number' ? ` / existing ${e.existingConfidence}` : ''}</div>
+              <div style={{ color: COLORS.textMuted }}>from {formatMergeValue(e.from)}</div>
+              <div style={{ color: COLORS.text }}>to {formatMergeValue(e.to)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function EnrichmentHistorySection({ history }) {
+  const [open, setOpen] = useState(false);
+  if (!Array.isArray(history) || history.length === 0) return null;
+  const events = history.slice().reverse();
+  return (
+    <Section title={`✨ Enrichment History (${history.length})`}>
+      <button onClick={() => setOpen((v) => !v)}
+        style={{ background: 'none', border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12, marginBottom: 8 }}>
+        {open ? 'Hide events' : 'Show events'}
+      </button>
+      {open && events.map((evt, i) => (
+        <div key={i} style={{ padding: 10, marginBottom: 8, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12, background: COLORS.cardAlt }}>
+          <div style={{ color: COLORS.textMuted, fontSize: 11, marginBottom: 6 }}>
+            {evt.at ? new Date(evt.at).toLocaleString() : '—'}
+            {typeof evt.overallConfidence === 'number' ? ` · overall ${evt.overallConfidence}%` : ''}
+            {evt.sourceInterviewId || evt.interviewId ? ` · interview ${(evt.sourceInterviewId || evt.interviewId).slice(0, 8)}…` : ''}
+          </div>
+          {(evt.changes || []).map((ch, j) => (
+            <div key={j} style={{ padding: '4px 0', borderTop: j === 0 ? 'none' : `1px solid ${COLORS.border}` }}>
+              <div><strong>{ch.field}</strong> · {formatActionLabel(ch.action)}
+                {typeof ch.incomingConfidence === 'number' ? ` · conf ${ch.incomingConfidence}` : ''}
+                {typeof ch.existingConfidence === 'number' ? ` / existing ${ch.existingConfidence}` : ''}
+              </div>
+              <div style={{ color: COLORS.textMuted }}>from {formatMergeValue(ch.from)}</div>
+              <div style={{ color: COLORS.text }}>to {formatMergeValue(ch.to)}</div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEnrich, allPeople = [], allCompanies = [] }) {
   const detailNavigate = useNavigate();
   const cfg = V2_SCHEMA[kind];
   const [enrichingId, setEnrichingId] = useState(null);
   const [enrichError, setEnrichError] = useState(null);
+  const [convertOpen, setConvertOpen] = useState(false);
   const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return null; } };
+
+  const CONVERTIBLE = new Set(['Research-Contact', 'Subscriber', 'Lead']);
+  const canConvert = kind === 'person' && CONVERTIBLE.has(row.lifecycle_stage || 'Research-Contact');
 
   const pains = parse(row.painPoints);
   const wtp = parse(row.wtpSignals);
@@ -582,6 +870,11 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
             <div style={{ marginTop: 8 }}>{row.lifecycle_stage ? <LifecycleStagePill stage={row.lifecycle_stage} size="lg" /> : <StatusPill status={row.status} />}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            {canConvert && (
+              <button onClick={() => setConvertOpen(true)} style={{ padding: '8px 14px', backgroundColor: COLORS.success, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+                🚀 Convert
+              </button>
+            )}
             <button onClick={onEdit} style={{ padding: '8px 14px', backgroundColor: COLORS.blueLight, color: COLORS.blue, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>✎ Edit</button>
             <button onClick={onDelete} style={{ padding: '8px 14px', backgroundColor: '#FEF2F2', color: COLORS.danger, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>🗑 Delete</button>
           </div>
@@ -590,18 +883,18 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
           {kind === 'company' ? (
             <>
-              <Tile label="Industry" value={row.industry} />
-              <Tile label="Revenue" value={row.revenue} />
-              <Tile label="Employees" value={row.employees} />
-              <Tile label="Years" value={row.yearsInBusiness} />
+              <Tile label="Industry" value={row.industry} history={row.enrichmentHistory} fieldName="industry" />
+              <Tile label="Revenue" value={row.revenue} history={row.enrichmentHistory} fieldName="revenue" />
+              <Tile label="Employees" value={row.employees} history={row.enrichmentHistory} fieldName="employees" />
+              <Tile label="Years" value={row.yearsInBusiness} history={row.enrichmentHistory} fieldName="yearsInBusiness" />
               <Tile label="Lead Score" value={row.leadScore ? `${row.leadScore}/10` : null} />
             </>
           ) : (
             <>
-              <Tile label="Firm Size" value={row.firmSize} />
-              <Tile label="Clients" value={row.clientCount} />
-              <Tile label="Avg Client Rev" value={row.avgClientRevenue} />
-              <Tile label="Years" value={row.yearsInPractice} />
+              <Tile label="Firm Size" value={row.firmSize} history={row.enrichmentHistory} fieldName="firmSize" />
+              <Tile label="Clients" value={row.clientCount} history={row.enrichmentHistory} fieldName="clientCount" />
+              <Tile label="Avg Client Rev" value={row.avgClientRevenue} history={row.enrichmentHistory} fieldName="avgClientRevenue" />
+              <Tile label="Years" value={row.yearsInPractice} history={row.enrichmentHistory} fieldName="yearsInPractice" />
               <Tile label="Lead Score" value={row.leadScore ? `${row.leadScore}/10` : null} />
             </>
           )}
@@ -638,6 +931,20 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
           </Section>
         )}
 
+        <RelatedPanel row={row} kind={kind} allPeople={allPeople} allCompanies={allCompanies} />
+
+        <DealsCard entityType={kind} entityId={row.id} />
+
+        <TargetsCard entityType={kind} entityId={row.id} />
+
+        <TasksCard entityType={kind} entityId={row.id} recordLabel={kind} />
+
+        {kind === 'person' && row.email && <GmailInbox email={row.email} />}
+
+        <EnrichmentHistorySection history={row.enrichmentHistory} />
+
+        <Timeline entityType={kind} entityId={row.id} />
+
         <Section title="📄 Linked Transcripts">
           {transcripts.length === 0 ? (
             <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>No transcripts linked.</div>
@@ -662,14 +969,128 @@ function ContactDetail({ row, kind, transcripts, onClose, onEdit, onDelete, onEn
           {enrichError && <div style={{ fontSize: 12, color: COLORS.danger, marginTop: 8 }}>{enrichError}</div>}
         </Section>
       </div>
+
+      {convertOpen && kind === 'person' && (
+        <ConvertWizard
+          person={row}
+          companies={allCompanies}
+          onClose={() => setConvertOpen(false)}
+          onDone={() => setConvertOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-function InterviewsListPage({ interviews, people, companies }) {
+function RelatedPanel({ row, kind, allPeople, allCompanies }) {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState('all');
-  const [search, setSearch] = useState('');
+  const norm = (s) => (s || '').trim().toLowerCase();
+
+  const linkStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, marginBottom: 6, cursor: 'pointer', fontSize: 13, background: COLORS.cardAlt };
+  const emptyStyle = { fontSize: 12, color: COLORS.textDim, fontStyle: 'italic' };
+
+  if (kind === 'person') {
+    const company = allCompanies.find((c) => c.id === row.company_id) || allCompanies.find((c) => norm(c.name) === norm(row.company) || norm(c.company) === norm(row.company));
+    if (!company) return null;
+    return (
+      <Section title="🏢 Related Company">
+        <div style={linkStyle} onClick={() => navigate(companyPath(company))}>
+          <div>
+            <div style={{ fontWeight: 600 }}>{company.name || company.company}</div>
+            <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
+              {company.industry && <>{company.industry}</>}
+              {company.revenue_band && <> · {company.revenue_band}</>}
+              {company.lifecycle_stage && <> · {company.lifecycle_stage}</>}
+            </div>
+          </div>
+          <div style={{ color: COLORS.textDim, fontSize: 16 }}>›</div>
+        </div>
+      </Section>
+    );
+  }
+
+  // kind === 'company'
+  const companyWorkspace = row.workspace || 'crm';
+  const peopleLabel = companyWorkspace === 'deal_flow' ? 'Practitioners' : 'People';
+  const peopleIcon = companyWorkspace === 'deal_flow' ? '👥' : '👥';
+  const relatedPeople = allPeople
+    .filter((p) => (p.workspace || 'deal_flow') === companyWorkspace)
+    .filter((p) => (p.company_id && p.company_id === row.id) || norm(p.company) === norm(row.name) || norm(p.company) === norm(row.company));
+  const parent = row.parent_company_id ? allCompanies.find((c) => c.id === row.parent_company_id) : null;
+  const subsidiaries = allCompanies.filter((c) => c.parent_company_id === row.id);
+
+  return (
+    <>
+      {parent && (
+        <Section title="⬆️ Parent Company">
+          <div style={linkStyle} onClick={() => navigate(companyPath(parent))}>
+            <div style={{ fontWeight: 600 }}>{parent.name || parent.company}</div>
+            <div style={{ color: COLORS.textDim, fontSize: 16 }}>›</div>
+          </div>
+        </Section>
+      )}
+      {subsidiaries.length > 0 && (
+        <Section title={`🏬 Subsidiaries (${subsidiaries.length})`}>
+          {subsidiaries.map((s) => (
+            <div key={s.id} style={linkStyle} onClick={() => navigate(companyPath(s))}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{s.name || s.company}</div>
+                <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>{s.industry || ''}{s.revenue_band && ` · ${s.revenue_band}`}</div>
+              </div>
+              <div style={{ color: COLORS.textDim, fontSize: 16 }}>›</div>
+            </div>
+          ))}
+        </Section>
+      )}
+      <Section title={`${peopleIcon} ${peopleLabel} (${relatedPeople.length})`}>
+        {relatedPeople.length === 0 ? (
+          <div style={emptyStyle}>No {peopleLabel.toLowerCase()} linked to this {companyWorkspace === 'deal_flow' ? 'firm' : 'company'} yet.</div>
+        ) : (
+          relatedPeople.map((p) => (
+            <div key={p.id} style={linkStyle} onClick={() => navigate(personPath(p))}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
+                  {p.role && <>{p.role}</>}
+                  {p.email && <> · {p.email}</>}
+                  {p.lifecycle_stage && <> · {p.lifecycle_stage}</>}
+                </div>
+              </div>
+              <div style={{ color: COLORS.textDim, fontSize: 16 }}>›</div>
+            </div>
+          ))
+        )}
+      </Section>
+    </>
+  );
+}
+
+function InterviewsListPage({ interviews, people, companies, workspace = 'deal_flow' }) {
+  const navigate = useNavigate();
+  const peoplePath = workspace === 'crm' ? '/crm/people' : '/deal-flow/practitioners';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewParam = searchParams.get('view');
+  const [filter, setFilter] = useState(() => readFilter(searchParams, 'filter') || 'all');
+  const [search, setSearch] = useState(() => readFilter(searchParams, 'q') || '');
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const { data: savedViews } = useCollection('views');
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!viewParam || !savedViews) return;
+    const v = savedViews.find((sv) => sv.id === viewParam);
+    if (!v || v.object_type !== 'interview') return;
+    const f = parseFilters(v);
+    if (f.filter) setFilter(f.filter);
+    if (f.q) setSearch(f.q);
+    const next = new URLSearchParams(searchParams); next.delete('view');
+    setSearchParams(next, { replace: true });
+  }, [viewParam, savedViews]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(encodeFiltersToSearch({ q: search, filter: filter === 'all' ? '' : filter }));
+    setSearchParams(next, { replace: true });
+  }, [search, filter]);
 
   const peopleById = Object.fromEntries(people.map((p) => [p.id, p]));
   const companiesById = Object.fromEntries(companies.map((c) => [c.id, c]));
@@ -707,15 +1128,33 @@ function InterviewsListPage({ interviews, people, companies }) {
     linked: enriched.filter((iv) => iv.linkedRecord).length,
   };
 
+  const exportColumns = [
+    { header: 'Interviewee', accessor: (r) => r.intervieweeName || r.intervieweeBusinessName || '' },
+    { header: 'Business', accessor: (r) => r.intervieweeBusinessName || '' },
+    { header: 'Date', accessor: (r) => r.interviewDate || '' },
+    { header: 'Status', accessor: (r) => r.status || '' },
+    { header: 'Linked Type', accessor: (r) => r.linkedType || '' },
+    { header: 'Linked Name', accessor: (r) => r.linkedRecord?.name || '' },
+  ];
+
   return (
     <div style={{ padding: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ color: COLORS.text, margin: 0 }}>
           🎙️ Interviews <span style={{ color: COLORS.textDim, fontSize: 16, fontWeight: 400 }}>({interviews.length})</span>
         </h2>
-        <input type="text" placeholder="Search interviews…" value={search} onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="text" placeholder="Search interviews…" value={search} onChange={(e) => setSearch(e.target.value)}
+            style={{ padding: '8px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 13, minWidth: 220 }} />
+          <button onClick={() => setSaveViewOpen(true)}
+            style={{ padding: '7px 12px', background: COLORS.cardAlt, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+            💾 Save view
+          </button>
+          <ExportCSVButton rows={sorted} columns={exportColumns} filename="interviews-export" />
+        </div>
       </div>
+
+      <SuggestedInterviews people={people} />
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <FilterChip value="all" label="All" count={counts.all} />
@@ -723,7 +1162,14 @@ function InterviewsListPage({ interviews, people, companies }) {
         <FilterChip value="linked" label="Linked" count={counts.linked} />
       </div>
 
-      {sorted.length === 0 ? (
+      {sorted.length === 0 && interviews.length === 0 ? (
+        <EmptyState
+          icon="🎙️"
+          title="No interviews yet"
+          body="Record discovery interviews and link them to the matching person or company."
+          primaryAction={{ label: 'Schedule your first', onClick: () => navigate(peoplePath) }}
+        />
+      ) : sorted.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: COLORS.textDim, backgroundColor: COLORS.card, borderRadius: 8, border: `1px dashed ${COLORS.border}` }}>
           No interviews match.
         </div>
@@ -733,12 +1179,13 @@ function InterviewsListPage({ interviews, people, companies }) {
             <div>Interviewee</div><div>Date</div><div>Linked To</div><div>Status</div>
           </div>
           {sorted.map((iv) => (
-            <div key={iv.id} onClick={() => navigate(`/interviews/${iv.id}`)}
+            <div key={iv.id} onClick={() => navigate(interviewPath(iv))}
               style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr 0.7fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
               <div style={{ fontWeight: 600 }}>
                 {iv.intervieweeName || iv.intervieweeBusinessName || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(unnamed)</span>}
+                <DedupStatusPill status={iv.dedupStatus} />
               </div>
               <div style={{ color: COLORS.textMuted }}>{iv.interviewDate || '—'}</div>
               <div style={{ color: COLORS.textMuted }}>
@@ -753,6 +1200,14 @@ function InterviewsListPage({ interviews, people, companies }) {
           ))}
         </div>
       )}
+
+      <SaveViewModal
+        open={saveViewOpen}
+        onClose={() => setSaveViewOpen(false)}
+        objectType="interview"
+        filters={{ q: search, filter }}
+        onSaved={() => toast && toast.success && toast.success('View pinned to sidebar.')}
+      />
     </div>
   );
 }
@@ -765,7 +1220,7 @@ function PipelinePage({ people, companies, onUpdateStatus }) {
 
   const cfg = V2_SCHEMA[kind];
   const rows = kind === 'company' ? companies : people;
-  const basePath = kind === 'company' ? '/companies' : '/people';
+  const basePath = kind === 'company' ? '/crm/companies' : '/crm/people';
 
   const columns = cfg.statusOptions;
   const grouped = columns.reduce((acc, s) => {
@@ -886,22 +1341,24 @@ function InterviewTriage({ interview, people, companies, linkPick, setLinkPick, 
   );
 }
 
-function InterviewDetailRoute({ interviews, people, companies, onUpdate, onLink, onCreatePerson, onCreateCompany }) {
+function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate, onLink, onCreatePerson, onCreateCompany, onEnrich }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const { call, loading: apiLoading } = useAPI();
-  const [tab, setTab] = useState('summary');
+  const [tab, setTab] = useState('questions');
   const [fetchingField, setFetchingField] = useState(null);
   const [fetchError, setFetchError] = useState(null);
   const [linkPick, setLinkPick] = useState({ type: 'person', id: '' });
   const [linkBusy, setLinkBusy] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeStatus, setAnalyzeStatus] = useState(null);
 
   const interview = interviews.find((i) => i.id === id);
 
   if (!interview) {
     return (
       <div style={{ padding: 20 }}>
-        <button onClick={() => navigate('/interviews')} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+        <button onClick={() => navigate(interviewsListPath(interview?.workspace || 'deal_flow'))} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
           ← Back to Interviews
         </button>
         <div style={{ padding: 40, textAlign: 'center', color: COLORS.textDim }}>Interview not found.</div>
@@ -935,31 +1392,71 @@ function InterviewDetailRoute({ interviews, people, companies, onUpdate, onLink,
   const activeField = tab === 'summary' ? 'summaryText' : 'transcriptText';
   const activeUrl = tab === 'summary' ? interview.summaryUrl : interview.transcriptUrl;
 
-  const TabBtn = ({ value, label, hasContent }) => (
+  const inferredScriptType = interview.script_type || (interview.linkedType === 'person' ? 'pro' : 'biz');
+  const activeScript = scripts.find((s) => s.type === inferredScriptType || s.id === inferredScriptType);
+  const totalQuestions = activeScript ? activeScript.sections.reduce((acc, s) => acc + s.questions.length, 0) : 0;
+  const askedIds = new Set(interview.questions_asked || []);
+  const askedCount = askedIds.size;
+  const progressPct = totalQuestions > 0 ? Math.round((askedCount / totalQuestions) * 100) : 0;
+  const resolveColor = (k) => COLORS[k] || k || COLORS.primary;
+
+  const toggleQuestion = async (qid) => {
+    const next = new Set(askedIds);
+    if (next.has(qid)) next.delete(qid); else next.add(qid);
+    await onUpdate(interview.id, { questions_asked: Array.from(next) });
+  };
+
+  const setScriptType = async (t) => { await onUpdate(interview.id, { script_type: t }); };
+
+  const handleAnalyze = async () => {
+    if (!linkedRecord) { setAnalyzeStatus({ ok: false, msg: 'Link this interview to a person or company first.' }); return; }
+    setAnalyzing(true);
+    setAnalyzeStatus(null);
+    const ok = await onEnrich(interview.linkedType, linkedRecord.id, interview.id);
+    setAnalyzing(false);
+    setAnalyzeStatus(ok ? { ok: true, msg: '✓ Analysis written to ' + (interview.linkedType === 'company' ? 'company' : 'person') + '.' } : { ok: false, msg: 'Analysis failed — check Settings / Drive permissions.' });
+    if (ok) setTimeout(() => setAnalyzeStatus(null), 3500);
+  };
+
+  const TabBtn = ({ value, label, hasContent, badge }) => (
     <button onClick={() => setTab(value)}
       style={{ padding: '10px 16px', background: 'none', border: 'none', borderBottom: `2px solid ${tab === value ? COLORS.accent : 'transparent'}`, color: tab === value ? COLORS.text : COLORS.textMuted, cursor: 'pointer', fontSize: 14, fontWeight: tab === value ? 600 : 400 }}>
       {label} {hasContent && <span style={{ fontSize: 10, color: COLORS.success }}>●</span>}
+      {typeof badge === 'string' && badge && <span style={{ fontSize: 10, color: COLORS.textDim, marginLeft: 4 }}>{badge}</span>}
     </button>
   );
 
   return (
     <div style={{ padding: 20 }}>
-      <button onClick={() => navigate('/interviews')} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+      <button onClick={() => navigate(interviewsListPath(interview?.workspace || 'deal_flow'))} style={{ marginBottom: 12, background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
         ← Back to Interviews
       </button>
 
       <div style={{ backgroundColor: COLORS.card, borderRadius: 12, padding: 28, border: `1px solid ${COLORS.border}`, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <h1 style={{ margin: '0 0 4px', color: COLORS.text, fontFamily: DISPLAY, fontSize: 28 }}>
           {interview.intervieweeName || interview.intervieweeBusinessName || 'Untitled Interview'}
         </h1>
+        {linkedRecord && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <button onClick={handleAnalyze} disabled={analyzing || !transcriptText}
+              title={!transcriptText ? 'Load transcript first' : ''}
+              style={{ padding: '8px 14px', backgroundColor: transcriptText ? COLORS.accent : COLORS.border, color: '#fff', border: 'none', borderRadius: 6, cursor: analyzing || !transcriptText ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 13 }}>
+              {analyzing ? 'Analyzing…' : '✨ Analyze & write-back'}
+            </button>
+            {analyzeStatus && <div style={{ fontSize: 11, color: analyzeStatus.ok ? COLORS.success : COLORS.danger }}>{analyzeStatus.msg}</div>}
+          </div>
+        )}
+        </div>
         <div style={{ color: COLORS.textMuted, fontSize: 14, marginBottom: 12 }}>
           {interview.interviewDate || 'No date'} · <StatusPill status={interview.status} />
         </div>
+        <DedupResolutionPanel interview={interview} people={people} companies={companies} />
         <div style={{ fontSize: 13, color: COLORS.textMuted }}>
           {linkedRecord ? (
             <>
               Linked to{' '}
-              <button onClick={() => navigate(`/${interview.linkedType === 'company' ? 'companies' : 'people'}/${linkedRecord.id}`)}
+              <button onClick={() => navigate(interview.linkedType === 'company' ? companyPath(linkedRecord) : personPath(linkedRecord))}
                 style={{ background: 'none', border: 'none', color: COLORS.primary, cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 600, textDecoration: 'underline' }}>
                 {interview.linkedType === 'company' ? '🏢' : '👤'} {linkedRecord.name}
               </button>
@@ -982,19 +1479,22 @@ function InterviewDetailRoute({ interviews, people, companies, onUpdate, onLink,
                 setLinkBusy(true);
                 await onLink(interview.id, linkPick.type, linkPick.id);
                 setLinkBusy(false);
-                navigate(`/${linkPick.type === 'company' ? 'companies' : 'people'}/${linkPick.id}`);
+                const row = linkPick.type === 'company' ? companies.find((c) => c.id === linkPick.id) : people.find((p) => p.id === linkPick.id);
+                if (row) navigate(linkPick.type === 'company' ? companyPath(row) : personPath(row));
               }}
               onCreateAndLink={async (kind) => {
                 setLinkBusy(true);
+                const ws = interview?.workspace || 'deal_flow';
                 const seed = kind === 'company'
-                  ? { name: interview.intervieweeName || interview.intervieweeBusinessName || '', company: interview.intervieweeBusinessName || '', status: 'new' }
-                  : { name: interview.intervieweeName || '', company: interview.intervieweeBusinessName || '', status: 'new' };
+                  ? { name: interview.intervieweeName || interview.intervieweeBusinessName || '', company: interview.intervieweeBusinessName || '', status: 'new', workspace: ws }
+                  : { name: interview.intervieweeName || '', company: interview.intervieweeBusinessName || '', status: 'new', workspace: ws };
                 const newId = `${kind}-${Date.now()}`;
                 if (kind === 'company') await onCreateCompany({ ...seed, id: newId });
                 else await onCreatePerson({ ...seed, id: newId });
                 await onLink(interview.id, kind, newId);
                 setLinkBusy(false);
-                navigate(`/${kind === 'company' ? 'companies' : 'people'}/${newId}`);
+                const fresh = { id: newId, workspace: ws };
+                navigate(kind === 'company' ? companyPath(fresh) : personPath(fresh));
               }}
             />
           )}
@@ -1003,11 +1503,51 @@ function InterviewDetailRoute({ interviews, people, companies, onUpdate, onLink,
 
       <div style={{ backgroundColor: COLORS.card, borderRadius: 12, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
         <div style={{ display: 'flex', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
+          <TabBtn value="questions" label="✅ Questions" badge={totalQuestions ? `${askedCount}/${totalQuestions}` : ''} />
           <TabBtn value="summary" label="📝 Summary" hasContent={!!summaryText} />
           <TabBtn value="transcript" label="📄 Transcript" hasContent={!!transcriptText} />
+          <TabBtn value="timeline" label="🕑 Timeline" />
         </div>
         <div style={{ padding: 24 }}>
-          {activeText ? (
+          {tab === 'timeline' ? (
+            <Timeline entityType="interview" entityId={interview.id} />
+          ) : tab === 'questions' ? (
+            !activeScript ? (
+              <div style={{ color: COLORS.textDim, fontStyle: 'italic' }}>No script available. Seed scripts from migrations or create in Scripts → Edit.</div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                  <span style={{ fontSize: 12, color: COLORS.textDim, fontWeight: 600 }}>Script:</span>
+                  <select value={inferredScriptType} onChange={(e) => setScriptType(e.target.value)}
+                    style={{ padding: '4px 8px', borderRadius: 4, border: `1px solid ${COLORS.border}`, fontSize: 12 }}>
+                    <option value="pro">PRO (practitioner)</option>
+                    <option value="biz">BIZ (business owner)</option>
+                  </select>
+                  <div style={{ flex: 1, height: 8, background: COLORS.border, borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${progressPct}%`, height: '100%', background: COLORS.success, transition: 'width 0.3s' }} />
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, minWidth: 72, textAlign: 'right' }}>{askedCount} / {totalQuestions} ({progressPct}%)</span>
+                </div>
+                {activeScript.sections.map((section) => (
+                  <div key={section.id} style={{ marginBottom: 20 }}>
+                    <div style={{ color: resolveColor(section.color), fontWeight: 700, fontSize: 14, marginBottom: 8, borderLeft: `4px solid ${resolveColor(section.color)}`, paddingLeft: 10 }}>{section.name}</div>
+                    {section.questions.map((q) => {
+                      const checked = askedIds.has(q.id);
+                      return (
+                        <label key={q.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10, marginBottom: 6, background: checked ? COLORS.primaryLight : 'transparent', border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', opacity: checked ? 0.75 : 1 }}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleQuestion(q.id)} style={{ marginTop: 3, accentColor: COLORS.success, cursor: 'pointer' }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 500, fontSize: 14, color: COLORS.text, textDecoration: checked ? 'line-through' : 'none' }}>{q.q}</div>
+                            {q.why && <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 3 }}>{q.why}</div>}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )
+          ) : activeText ? (
             <>
               <div className="markdown-body" style={{ fontFamily: FONT, fontSize: 14, lineHeight: 1.6, color: COLORS.text }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeText}</ReactMarkdown>
@@ -1047,11 +1587,13 @@ function InterviewDetailRoute({ interviews, people, companies, onUpdate, onLink,
           {fetchError && <div style={{ marginTop: 12, color: COLORS.danger, fontSize: 13 }}>{fetchError}</div>}
         </div>
       </div>
+
+      <TasksCard entityType="interview" entityId={interview.id} recordLabel="interview" />
     </div>
   );
 }
 
-function ContactDetailRoute({ kind, basePath, rows, transcripts, onDelete, onEnrich }) {
+function ContactDetailRoute({ kind, basePath, rows, transcripts, onDelete, onEnrich, allPeople, allCompanies }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const row = rows.find((r) => r.id === id);
@@ -1081,14 +1623,19 @@ function ContactDetailRoute({ kind, basePath, rows, transcripts, onDelete, onEnr
         }
       }}
       onEnrich={(transcriptId) => onEnrich(kind, row.id, transcriptId)}
+      allPeople={allPeople}
+      allCompanies={allCompanies}
     />
   );
 }
 
-function Tile({ label, value }) {
+function Tile({ label, value, history, fieldName }) {
   return (
     <div style={{ padding: 14, backgroundColor: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
-      <div style={{ fontSize: 10, color: COLORS.textDim, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: COLORS.textDim, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+        {label}
+        {history && fieldName && <EnrichmentFieldClock history={history} field={fieldName} />}
+      </div>
       <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.text }}>{value || <span style={{ color: COLORS.textDim, fontWeight: 400 }}>—</span>}</div>
     </div>
   );
@@ -1126,8 +1673,9 @@ function KVList({ obj }) {
 }
 
 // ==================== SCRIPT PAGE ====================
-function ScriptPage({ contacts, scriptType }) {
-  const script = scriptType === 'pro' ? PRO_SCRIPT : BIZ_SCRIPT;
+function ScriptPage({ contacts, scriptType, script }) {
+  if (!script) return null;
+  const resolveColor = (k) => COLORS[k] || k || COLORS.primary;
   const [checkedQs, setCheckedQs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('autopilot-checklist') || '{}'); } catch { return {}; }
   });
@@ -1153,8 +1701,8 @@ function ScriptPage({ contacts, scriptType }) {
       </div>
       <div style={{ backgroundColor: COLORS.card, padding: 20, borderRadius: 4, border: `1px solid ${COLORS.border}` }}>
         {script.sections.map((section, sectionIdx) => (
-          <div key={sectionIdx} style={{ marginBottom: 28 }}>
-            <h3 style={{ color: section.color, fontWeight: 700, marginBottom: 12, fontSize: 17 }}>{section.name}</h3>
+          <div key={section.id || sectionIdx} style={{ marginBottom: 28 }}>
+            <h3 style={{ color: resolveColor(section.color), fontWeight: 700, marginBottom: 12, fontSize: 17 }}>{section.name}</h3>
             {section.questions.map((question, qIdx) => {
               const key = `${scriptType}-${sectionIdx}-${qIdx}`;
               const isChecked = checkedQs[key];
@@ -1184,6 +1732,30 @@ function ThemesPage({ businesses, practitioners }) {
   const [pracLoading, setPracLoading] = useState(false);
   const [bizError, setBizError] = useState(null);
   const [pracError, setPracError] = useState(null);
+  const [saveStatus, setSaveStatus] = useState({});
+  const { data: syntheses } = useCollection('syntheses');
+
+  const saveSynthesis = async (kind, themes) => {
+    if (!themes) return;
+    const baseCount = kind === 'business' ? businesses.filter((b) => b.enrichedAt || b.painPoints).length : practitioners.filter((p) => p.enrichedAt || p.painPoints).length;
+    const id = `synth-${Date.now()}`;
+    const name = (window.prompt('Name this synthesis:', `${kind === 'business' ? 'Business' : 'Practitioner'} themes · ${new Date().toLocaleDateString()}`) || '').trim();
+    if (!name) return;
+    setSaveStatus((s) => ({ ...s, [kind]: 'saving' }));
+    try {
+      await createDoc('syntheses', { name, kind, themes, interview_count: baseCount, createdAt: new Date().toISOString() }, id);
+      setSaveStatus((s) => ({ ...s, [kind]: 'saved' }));
+      setTimeout(() => setSaveStatus((s) => ({ ...s, [kind]: null })), 1800);
+    } catch (err) {
+      console.error('Save synthesis failed', err);
+      setSaveStatus((s) => ({ ...s, [kind]: 'error' }));
+    }
+  };
+
+  const deleteSynthesis = async (id) => {
+    if (!window.confirm('Delete this synthesis?')) return;
+    await deleteDoc('syntheses', id);
+  };
 
   const analyzeBusinesses = async () => {
     setBizLoading(true);
@@ -1231,6 +1803,8 @@ function ThemesPage({ businesses, practitioners }) {
         loading={bizLoading}
         error={bizError}
         onAnalyze={analyzeBusinesses}
+        onSave={() => saveSynthesis('business', bizThemes)}
+        saveStatus={saveStatus.business}
       />
 
       <ThemeSection
@@ -1243,12 +1817,33 @@ function ThemesPage({ businesses, practitioners }) {
         loading={pracLoading}
         error={pracError}
         onAnalyze={analyzePractitioners}
+        onSave={() => saveSynthesis('practitioner', pracThemes)}
+        saveStatus={saveStatus.practitioner}
       />
+
+      {syntheses.length > 0 && (
+        <div style={{ marginTop: 32, paddingTop: 24, borderTop: `1px solid ${COLORS.border}` }}>
+          <h3 style={{ color: COLORS.text, margin: '0 0 12px', fontSize: 18 }}>💾 Saved Syntheses ({syntheses.length})</h3>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {[...syntheses].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).map((s) => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 6 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div>
+                  <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>
+                    {s.kind} · {s.interview_count || 0} records · {s.createdAt ? new Date(s.createdAt).toLocaleString() : ''}
+                  </div>
+                </div>
+                <button onClick={() => deleteSynthesis(s.id)} style={{ background: 'none', border: 'none', color: COLORS.danger, cursor: 'pointer', fontSize: 14 }}>🗑</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ThemeSection({ title, icon, color, count, total, themes, loading, error, onAnalyze }) {
+function ThemeSection({ title, icon, color, count, total, themes, loading, error, onAnalyze, onSave, saveStatus }) {
   return (
     <div style={{ marginBottom: 56 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -1258,12 +1853,20 @@ function ThemeSection({ title, icon, color, count, total, themes, loading, error
             ({count} enriched{total !== count ? ` of ${total}` : ''})
           </span>
         </h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+        {themes && onSave && (
+          <button onClick={onSave} disabled={saveStatus === 'saving'}
+            style={{ padding: '10px 16px', backgroundColor: saveStatus === 'saved' ? COLORS.success : 'transparent', border: `1px solid ${saveStatus === 'saved' ? COLORS.success : COLORS.border}`, color: saveStatus === 'saved' ? '#fff' : COLORS.text, borderRadius: 8, cursor: saveStatus === 'saving' ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 12 }}>
+            {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? '✓ Saved' : saveStatus === 'error' ? '✗ Retry' : '💾 Save as synthesis'}
+          </button>
+        )}
         <button onClick={onAnalyze} disabled={loading || count === 0}
           style={{ padding: '10px 22px', backgroundColor: loading || count === 0 ? COLORS.border : color, color: loading || count === 0 ? COLORS.textMuted : '#fff', border: 'none', borderRadius: 8, cursor: loading || count === 0 ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
           {loading ? (
             <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'autopilot-spin 0.7s linear infinite' }} /> Analyzing…</>
           ) : '🔍 Analyze Themes'}
         </button>
+        </div>
       </div>
 
       {error && (
@@ -1554,7 +2157,53 @@ function App() {
 const KIND_TO_LEGACY_CONTACT_TYPE = { person: 'practitioner', company: 'business' };
 
 function MainApp({ user, onSignOut }) {
-  const [migrating, setMigrating] = useState(!hasMigrated() || !hasRenamed() || !hasLifecycleMigrated());
+  const [migrating, setMigrating] = useState(!hasMigrated() || !hasRenamed() || !hasLifecycleMigrated() || !hasScriptsSeeded() || !hasPipelinesSeeded() || !hasTargetPipelinesSeeded() || !hasWorkspaceBackfilled());
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const navigateRoot = useNavigate();
+  const { id: workspaceId } = useWorkspace();
+
+  // Map pathname → where ⌘-N should land to create a new record.
+  const NEW_RECORD_ROUTES = {
+    '/crm/people': '/crm/people?new=1',
+    '/crm/companies': '/crm/companies?new=1',
+    '/crm/interviews': '/crm/interviews',
+    '/crm/tasks': '/crm/tasks?new=1',
+    '/crm/deals': '/crm/deals?new=1',
+    '/deal-flow/practitioners': '/deal-flow/practitioners?new=1',
+    '/deal-flow/firms': '/deal-flow/firms?new=1',
+    '/deal-flow/interviews': '/deal-flow/interviews',
+    '/deal-flow/tasks': '/deal-flow/tasks?new=1',
+    '/deal-flow/targets': '/deal-flow/targets?new=1',
+    '/deal-flow/referrals': '/deal-flow/referrals?new=1',
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      const isMeta = e.metaKey || e.ctrlKey;
+      if (isMeta && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+      if (isMeta && e.key === '/') {
+        e.preventDefault();
+        navigateRoot('/settings#shortcuts');
+        return;
+      }
+      if (isMeta && (e.key === 'n' || e.key === 'N')) {
+        // Don't hijack the browser's own ⌘-N for "new window" inside form fields.
+        if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        e.preventDefault();
+        const path = window.location.pathname.replace(/^\/autopilot-discovery-crm/, '') || '/';
+        const parts = path.split('/').filter(Boolean);
+        const base = parts.length >= 2 ? `/${parts[0]}/${parts[1]}` : `/${parts[0] || ''}`;
+        const target = NEW_RECORD_ROUTES[base];
+        if (target) navigateRoot(target);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigateRoot]);
 
   const { call, loading: apiLoading } = useAPI();
   const windowWidth = useWindowWidth();
@@ -1563,16 +2212,24 @@ function MainApp({ user, onSignOut }) {
   const { data: people, loading: peopleLoading } = useCollection('people', { enabled: !migrating });
   const { data: companies, loading: companiesLoading } = useCollection('companies', { enabled: !migrating });
   const { data: interviews, loading: interviewsLoading } = useCollection('interviews', { enabled: !migrating });
+  const { data: scripts } = useCollection('scripts', { enabled: !migrating });
+
+  // Sprint 4: subscribe to pending-ingestion interviews and process them.
+  const ingestion = useIngestionProcessor({ enabled: !migrating });
 
   const loading = apiLoading || peopleLoading || companiesLoading || interviewsLoading;
 
   useEffect(() => {
-    if (hasMigrated() && hasRenamed() && hasLifecycleMigrated()) return;
+    if (hasMigrated() && hasRenamed() && hasLifecycleMigrated() && hasScriptsSeeded() && hasPipelinesSeeded() && hasTargetPipelinesSeeded() && hasWorkspaceBackfilled()) return;
     (async () => {
       try {
         if (!hasMigrated()) await migrateSheetsToFirestore();
         if (!hasRenamed()) await renameCollectionsV2();
         if (!hasLifecycleMigrated()) await migrateLifecycleStages();
+        if (!hasScriptsSeeded()) await seedScripts();
+        if (!hasPipelinesSeeded()) await seedPipelines();
+        if (!hasTargetPipelinesSeeded()) await seedTargetPipelines();
+        if (!hasWorkspaceBackfilled()) await migrateWorkspaceBackfill();
       } catch (err) {
         console.error('Migration/rename failed', err);
       } finally {
@@ -1583,12 +2240,15 @@ function MainApp({ user, onSignOut }) {
 
   const handleUpsertPerson = async (row) => {
     const { id, ...data } = row;
-    const existing = id && people.some((p) => p.id === id);
-    if (existing) {
+    const prev = id && people.find((p) => p.id === id);
+    if (prev) {
       await updateDoc('people', id, data);
+      if (prev.lifecycle_stage !== data.lifecycle_stage && data.lifecycle_stage) {
+        logInteraction({ kind: 'stage_change', entity_type: 'person', entity_id: id, title: 'Lifecycle stage changed', from_stage: prev.lifecycle_stage || null, to_stage: data.lifecycle_stage }).catch(() => {});
+      }
     } else {
       const newId = id || `person-${Date.now()}`;
-      await createDoc('people', data, newId);
+      await createDoc('people', { workspace: data.workspace || workspaceId, ...data }, newId);
     }
     return true;
   };
@@ -1599,14 +2259,21 @@ function MainApp({ user, onSignOut }) {
 
   const handleUpsertCompany = async (row) => {
     const { id, ...data } = row;
-    const existing = id && companies.some((c) => c.id === id);
-    if (existing) {
+    const prev = id && companies.find((c) => c.id === id);
+    if (prev) {
       await updateDoc('companies', id, data);
+      if (prev.lifecycle_stage !== data.lifecycle_stage && data.lifecycle_stage) {
+        logInteraction({ kind: 'stage_change', entity_type: 'company', entity_id: id, title: 'Lifecycle stage changed', from_stage: prev.lifecycle_stage || null, to_stage: data.lifecycle_stage }).catch(() => {});
+      }
     } else {
       const newId = id || `company-${Date.now()}`;
-      await createDoc('companies', data, newId);
+      await createDoc('companies', { workspace: data.workspace || workspaceId, ...data }, newId);
     }
     return true;
+  };
+
+  const handleUpdateCompany = async (id, patch) => {
+    await updateDoc('companies', id, patch);
   };
 
   const handleDeleteCompany = async (id) => {
@@ -1652,46 +2319,122 @@ function MainApp({ user, onSignOut }) {
     ...companies.map((c) => ({ ...c, type: 'biz' })),
   ];
 
+  // Workspace-scoped subsets. Records missing the `workspace` field fall back to a
+  // heuristic (people default to deal_flow, companies to crm) — matches migration logic.
+  const wsOf = (row, fallback) => row.workspace || fallback;
+  const peopleCrm = people.filter((p) => wsOf(p, 'deal_flow') === 'crm');
+  const peopleDf = people.filter((p) => wsOf(p, 'deal_flow') === 'deal_flow');
+  const companiesCrm = companies.filter((c) => wsOf(c, 'crm') === 'crm');
+  const firms = companies.filter((c) => wsOf(c, 'crm') === 'deal_flow');
+  const interviewsCrm = interviews.filter((iv) => wsOf(iv, 'deal_flow') === 'crm');
+  const interviewsDf = interviews.filter((iv) => wsOf(iv, 'deal_flow') === 'deal_flow');
+
   const routes = (
     <Routes>
-      <Route path="/" element={
-        <DashboardPage people={people} companies={companies} interviews={interviews} />
+      {/* ───── Root + legacy redirects ───── */}
+      <Route path="/" element={<Navigate to="/crm" replace />} />
+      <Route path="/people" element={<Navigate to="/crm/people" replace />} />
+      <Route path="/people/:id" element={<LegacyRecordRedirect rows={people} fallback="crm" crmPath="/crm/people" dealFlowPath="/deal-flow/practitioners" />} />
+      <Route path="/companies" element={<Navigate to="/crm/companies" replace />} />
+      <Route path="/companies/:id" element={<LegacyRecordRedirect rows={companies} fallback="crm" crmPath="/crm/companies" dealFlowPath="/deal-flow/firms" />} />
+      <Route path="/interviews" element={<Navigate to="/deal-flow/interviews" replace />} />
+      <Route path="/interviews/:id" element={<LegacyRecordRedirect rows={interviews} fallback="deal_flow" crmPath="/crm/interviews" dealFlowPath="/deal-flow/interviews" />} />
+      <Route path="/tasks" element={<Navigate to="/crm/tasks" replace />} />
+      <Route path="/deals" element={<Navigate to="/crm/deals" replace />} />
+      <Route path="/deals/:id" element={<LegacyPrefixRedirect prefix="/crm/deals" />} />
+      <Route path="/targets" element={<Navigate to="/deal-flow/targets" replace />} />
+      <Route path="/targets/:id" element={<LegacyPrefixRedirect prefix="/deal-flow/targets" />} />
+      <Route path="/board" element={<Navigate to="/crm/board" replace />} />
+      <Route path="/pipeline" element={<Navigate to="/crm/board" replace />} />
+      <Route path="/insights" element={<Navigate to="/deal-flow/insights" replace />} />
+      <Route path="/themes" element={<Navigate to="/deal-flow/insights" replace />} />
+      <Route path="/scripts" element={<Navigate to="/deal-flow/scripts" replace />} />
+      <Route path="/scripts/pro" element={<Navigate to="/deal-flow/scripts" replace />} />
+      <Route path="/scripts/biz" element={<Navigate to="/deal-flow/scripts" replace />} />
+
+      {/* ───── CRM workspace ───── */}
+      <Route path="/crm" element={
+        <DashboardPage people={peopleCrm} companies={companiesCrm} interviews={interviewsCrm} workspace="crm" />
       } />
-      <Route path="/people" element={
-        <V2ContactPage kind="person" basePath="/people" rows={people} transcripts={interviews}
+      <Route path="/crm/people" element={
+        <V2ContactPage kind="person" workspace="crm" basePath="/crm/people" rows={peopleCrm} transcripts={interviewsCrm}
           onUpsert={handleUpsertPerson} onDelete={handleDeletePerson}
           onLinkTranscript={handleLinkInterview} onEnrich={handleEnrichContact} loading={loading} />
       } />
-      <Route path="/people/:id" element={
-        <ContactDetailRoute kind="person" basePath="/people" rows={people}
-          transcripts={interviews} onDelete={handleDeletePerson} onEnrich={handleEnrichContact} />
+      <Route path="/crm/people/:id" element={
+        <ContactDetailRoute kind="person" basePath="/crm/people" rows={people}
+          transcripts={interviews} onDelete={handleDeletePerson} onEnrich={handleEnrichContact}
+          allPeople={people} allCompanies={companies} />
       } />
-      <Route path="/companies" element={
-        <V2ContactPage kind="company" basePath="/companies" rows={companies} transcripts={interviews}
+      <Route path="/crm/companies" element={
+        <V2ContactPage kind="company" workspace="crm" basePath="/crm/companies" rows={companiesCrm} transcripts={interviewsCrm}
           onUpsert={handleUpsertCompany} onDelete={handleDeleteCompany}
           onLinkTranscript={handleLinkInterview} onEnrich={handleEnrichContact} loading={loading} />
       } />
-      <Route path="/companies/:id" element={
-        <ContactDetailRoute kind="company" basePath="/companies" rows={companies}
-          transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact} />
+      <Route path="/crm/companies/:id" element={
+        <ContactDetailRoute kind="company" basePath="/crm/companies" rows={companies}
+          transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact}
+          allPeople={people} allCompanies={companies} />
       } />
-      <Route path="/interviews" element={
-        <InterviewsListPage interviews={interviews} people={people} companies={companies} />
+      <Route path="/crm/interviews" element={
+        <InterviewsListPage interviews={interviewsCrm} people={peopleCrm} companies={companiesCrm} workspace="crm" />
       } />
-      <Route path="/interviews/:id" element={
-        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} />
+      <Route path="/crm/interviews/:id" element={
+        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} scripts={scripts} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} onEnrich={handleEnrichContact} />
       } />
-      <Route path="/board" element={
-        <PipelinePage people={people} companies={companies} onUpdateStatus={handleUpdateStatus} />
+      <Route path="/crm/tasks" element={<Tasks workspace="crm" />} />
+      <Route path="/crm/deals" element={<DealsList workspace="crm" />} />
+      <Route path="/crm/deals/:id" element={<DealDetail />} />
+      <Route path="/crm/board" element={
+        <PipelinePage people={peopleCrm} companies={companiesCrm} onUpdateStatus={handleUpdateStatus} />
       } />
-      <Route path="/pipeline" element={<Navigate to="/board" replace />} />
-      <Route path="/insights" element={<ThemesPage businesses={companies} practitioners={people} />} />
-      <Route path="/themes" element={<Navigate to="/insights" replace />} />
-      <Route path="/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} />} />
-      <Route path="/scripts/pro" element={<Navigate to="/scripts" replace />} />
-      <Route path="/scripts/biz" element={<Navigate to="/scripts" replace />} />
+
+      {/* ───── Deal Flow workspace ───── */}
+      <Route path="/deal-flow" element={
+        <DashboardPage people={peopleDf} companies={firms} interviews={interviewsDf} workspace="deal_flow" />
+      } />
+      <Route path="/deal-flow/practitioners" element={
+        <V2ContactPage kind="person" workspace="deal_flow" basePath="/deal-flow/practitioners" rows={peopleDf} transcripts={interviewsDf}
+          onUpsert={handleUpsertPerson} onDelete={handleDeletePerson}
+          onLinkTranscript={handleLinkInterview} onEnrich={handleEnrichContact} loading={loading} />
+      } />
+      <Route path="/deal-flow/practitioners/:id" element={
+        <ContactDetailRoute kind="person" basePath="/deal-flow/practitioners" rows={people}
+          transcripts={interviews} onDelete={handleDeletePerson} onEnrich={handleEnrichContact}
+          allPeople={people} allCompanies={companies} />
+      } />
+      <Route path="/deal-flow/firms" element={
+        <V2ContactPage kind="company" workspace="deal_flow" basePath="/deal-flow/firms" rows={firms} transcripts={interviewsDf}
+          onUpsert={handleUpsertCompany} onDelete={handleDeleteCompany}
+          onLinkTranscript={handleLinkInterview} onEnrich={handleEnrichContact} loading={loading} />
+      } />
+      <Route path="/deal-flow/firms/:id" element={
+        <ContactDetailRoute kind="company" basePath="/deal-flow/firms" rows={companies}
+          transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact}
+          allPeople={people} allCompanies={companies} />
+      } />
+      <Route path="/deal-flow/interviews" element={
+        <InterviewsListPage interviews={interviewsDf} people={peopleDf} companies={firms} workspace="deal_flow" />
+      } />
+      <Route path="/deal-flow/interviews/:id" element={
+        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} scripts={scripts} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} onEnrich={handleEnrichContact} />
+      } />
+      <Route path="/deal-flow/tasks" element={<Tasks workspace="deal_flow" />} />
+      <Route path="/deal-flow/targets" element={<TargetsList />} />
+      <Route path="/deal-flow/targets/:id" element={<TargetDetail />} />
+      <Route path="/deal-flow/referrals" element={
+        <ReferralPartnersList firms={firms} loading={loading} onUpsertCompany={handleUpsertCompany} />
+      } />
+      <Route path="/deal-flow/referrals/pipeline" element={
+        <ReferralPipeline firms={firms} loading={loading} onUpdateCompany={handleUpdateCompany} />
+      } />
+      <Route path="/deal-flow/insights" element={<ThemesPage businesses={companiesCrm} practitioners={peopleDf} />} />
+      <Route path="/deal-flow/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} />} />
+
+      {/* ───── Global ───── */}
+      <Route path="/review" element={<DedupReviewQueue />} />
       <Route path="/settings" element={<SettingsPageNew user={user} onSignOut={onSignOut} />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/crm" replace />} />
     </Routes>
   );
 
@@ -1716,13 +2459,32 @@ function MainApp({ user, onSignOut }) {
         <div style={{ display: 'flex', width: '100%' }}>
           <Sidebar user={user} onSignOut={onSignOut} />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <TopBar onOpenSearch={() => { /* ⌘K palette ships in Phase 4 */ }} />
+            <TopBar
+              onOpenSearch={() => setPaletteOpen(true)}
+              isProcessing={ingestion.isProcessing}
+              pendingCount={ingestion.pendingCount}
+              reviewCount={ingestion.reviewCount}
+            />
             <div style={{ flex: 1, overflowY: 'auto', backgroundColor: COLORS.bg }}>{routes}</div>
           </div>
         </div>
       )}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} people={people} companies={companies} interviews={interviews} />
     </div>
   );
+}
+
+function LegacyRecordRedirect({ rows, fallback, crmPath, dealFlowPath }) {
+  const { id } = useParams();
+  const row = rows.find((r) => r.id === id);
+  const ws = row?.workspace || fallback;
+  const base = ws === 'deal_flow' ? dealFlowPath : crmPath;
+  return <Navigate to={`${base}/${id}`} replace />;
+}
+
+function LegacyPrefixRedirect({ prefix }) {
+  const { id } = useParams();
+  return <Navigate to={`${prefix}/${id}`} replace />;
 }
 
 export default App;

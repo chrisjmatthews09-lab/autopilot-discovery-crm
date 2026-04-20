@@ -3,6 +3,14 @@
 
 import React, { useEffect } from 'react';
 import { COLORS } from '../config/design-tokens';
+import {
+  getInterviewTranscript,
+  getInterviewSummary,
+  getInterviewTranscriptUrl,
+  getInterviewSummaryUrl,
+  getInterviewHeadline,
+  formatInterviewDate,
+} from '../lib/interviewFields.js';
 
 export default function TranscriptModal({ interview, mode = 'transcript', onClose }) {
   useEffect(() => {
@@ -14,9 +22,10 @@ export default function TranscriptModal({ interview, mode = 'transcript', onClos
   if (!interview) return null;
 
   const title = mode === 'summary' ? 'Summary' : 'Transcript';
-  const text = mode === 'summary' ? interview.summaryText : interview.transcriptText;
-  const url = mode === 'summary' ? interview.summaryUrl : interview.transcriptUrl;
-  const name = interview.intervieweeName || interview.intervieweeBusinessName || 'Interview';
+  const text = mode === 'summary' ? getInterviewSummary(interview) : getInterviewTranscript(interview);
+  const url = mode === 'summary' ? getInterviewSummaryUrl(interview) : getInterviewTranscriptUrl(interview);
+  const name = getInterviewHeadline(interview) || 'Interview';
+  const dateLabel = formatInterviewDate(interview);
 
   return (
     <div
@@ -43,7 +52,7 @@ export default function TranscriptModal({ interview, mode = 'transcript', onClos
               {mode === 'summary' ? '📄 Summary' : '🎙️ Transcript'}
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.text, marginTop: 2 }}>
-              {name}{interview.interviewDate ? ` · ${interview.interviewDate}` : ''}
+              {name}{dateLabel ? ` · ${dateLabel}` : ''}
             </div>
           </div>
           <button

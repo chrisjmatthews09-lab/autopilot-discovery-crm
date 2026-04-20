@@ -10,6 +10,13 @@ import { estimatedEV, daysSinceLastTouch, isGoingCold, RELATIONSHIP_COLORS } fro
 import { logInteraction } from '../data/interactions';
 import { personPath, companyPath, interviewPath, interviewsListPath } from '../config/workspaces';
 import { useWorkspace } from '../hooks/useWorkspace';
+import {
+  getInterviewHeadline,
+  getInterviewDate,
+  getInterviewSummary,
+  getInterviewUpdatedAt,
+  formatInterviewDate,
+} from '../lib/interviewFields.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -101,17 +108,17 @@ export default function Dashboard({ people, companies, interviews }) {
   }, [people, companies]);
 
   const thisWeek = useMemo(() => {
-    const interviewsThisWeek = interviews.filter((i) => withinDays(i.interviewDate || i.createdAt, 7)).length;
+    const interviewsThisWeek = interviews.filter((i) => withinDays(getInterviewDate(i), 7)).length;
     const updatedPeople = people.filter((p) => withinDays(p.updatedAt, 7)).length;
     const updatedCompanies = companies.filter((c) => withinDays(c.updatedAt, 7)).length;
-    const newlyAnalyzed = interviews.filter((i) => (i.painPoints || i.wtpSignals) && withinDays(i.updatedAt, 7)).length;
+    const newlyAnalyzed = interviews.filter((i) => i.enrichmentRanAt && withinDays(i.enrichmentRanAt, 7)).length;
     return { interviewsThisWeek, updatedPeople, updatedCompanies, newlyAnalyzed };
   }, [people, companies, interviews]);
 
   const recentInsights = useMemo(() => {
     return [...interviews]
-      .filter((i) => i.summaryText || i.painPoints || i.wtpSignals)
-      .sort((a, b) => toMs(b.updatedAt) - toMs(a.updatedAt))
+      .filter((i) => getInterviewSummary(i) || i.enrichmentRanAt)
+      .sort((a, b) => toMs(getInterviewUpdatedAt(b)) - toMs(getInterviewUpdatedAt(a)))
       .slice(0, 5);
   }, [interviews]);
 
@@ -119,7 +126,7 @@ export default function Dashboard({ people, companies, interviews }) {
     const items = [
       ...people.map((p) => ({ kind: 'person', id: p.id, label: p.name || '(unnamed)', ts: toMs(p.updatedAt), path: personPath(p) })),
       ...companies.map((c) => ({ kind: 'company', id: c.id, label: c.name || c.company || '(unnamed)', ts: toMs(c.updatedAt), path: companyPath(c) })),
-      ...interviews.map((i) => ({ kind: 'interview', id: i.id, label: i.intervieweeName || i.intervieweeBusinessName || 'Interview', ts: toMs(i.updatedAt), path: interviewPath(i) })),
+      ...interviews.map((i) => ({ kind: 'interview', id: i.id, label: getInterviewHeadline(i) || 'Interview', ts: toMs(getInterviewUpdatedAt(i)), path: interviewPath(i) })),
     ];
     return items.filter((x) => x.ts > 0).sort((a, b) => b.ts - a.ts).slice(0, 8);
   }, [people, companies, interviews]);
@@ -244,19 +251,23 @@ export default function Dashboard({ people, companies, interviews }) {
           {recentInsights.length === 0 ? (
             <div style={{ color: COLORS.textDim, fontSize: 12, fontStyle: 'italic' }}>No analyzed interviews yet. Open an interview and run ✨ Analyze.</div>
           ) : (
-            recentInsights.map((iv) => (
-              <Link key={iv.id} to={interviewPath(iv)} style={{ textDecoration: 'none', display: 'block', padding: '8px 0', borderBottom: `1px solid ${COLORS.border}` }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text }}>
-                  {iv.intervieweeName || iv.intervieweeBusinessName || 'Interview'}
-                  {iv.interviewDate && <span style={{ color: COLORS.textMuted, fontWeight: 400 }}> · {iv.interviewDate}</span>}
-                </div>
-                {iv.summaryText && (
-                  <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                    {iv.summaryText.slice(0, 180)}
+            recentInsights.map((iv) => {
+              const dateLabel = formatInterviewDate(iv);
+              const summary = getInterviewSummary(iv);
+              return (
+                <Link key={iv.id} to={interviewPath(iv)} style={{ textDecoration: 'none', display: 'block', padding: '8px 0', borderBottom: `1px solid ${COLORS.border}` }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.text }}>
+                    {getInterviewHeadline(iv) || 'Interview'}
+                    {dateLabel && <span style={{ color: COLORS.textMuted, fontWeight: 400 }}> · {dateLabel}</span>}
                   </div>
-                )}
-              </Link>
-            ))
+                  {summary && (
+                    <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                      {summary.slice(0, 180)}
+                    </div>
+                  )}
+                </Link>
+              );
+            })
           )}
         </Card>
 

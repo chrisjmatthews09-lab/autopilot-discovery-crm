@@ -11,6 +11,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { COLORS } from '../config/design-tokens';
 import { createDoc, updateDoc } from '../data/firestore';
+import { getInterviewDate } from '../lib/interviewFields.js';
 
 function toMs(v) {
   if (!v) return 0;
@@ -63,7 +64,7 @@ export default function CompanyContactsSection({ company, contacts, interviews, 
         if (interviewBelongsToPerson(iv, c.id)) {
           const entry = map.get(c.id);
           entry.interviewCount += 1;
-          const ts = toMs(iv.interviewDate || iv.createdAt);
+          const ts = toMs(getInterviewDate(iv));
           if (ts > entry.lastTs) entry.lastTs = ts;
         }
       });

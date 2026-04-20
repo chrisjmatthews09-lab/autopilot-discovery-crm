@@ -67,21 +67,24 @@ export default function SuggestedInterviews({ people = [], onCreated }) {
       const attendee = (event.attendees || []).find((a) => !a.self && !a.organizer) || (event.attendees || [])[0];
       const match = attendee?.email ? people.find((p) => (p.email || '').toLowerCase() === attendee.email.toLowerCase()) : null;
       const id = `interview-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const interviewDate = event.start ? event.start.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const title = event.summary || attendee?.name || attendee?.email || '';
       await createDoc('interviews', {
-        intervieweeName: attendee?.name || attendee?.email || event.summary || '',
-        intervieweeBusinessName: '',
-        interviewDate,
-        scheduled_at: event.start,
-        end_at: event.end,
-        status: 'scheduled',
+        title,
+        recordedAt: event.start || null,
+        endAt: event.end || null,
+        transcript: null,
+        summary: null,
+        transcriptDriveUrl: null,
+        summaryDriveUrl: null,
+        scheduled: true,
         linkedType: match ? 'person' : null,
         linkedContactId: match ? match.id : null,
         source: 'google_calendar',
-        source_event_id: event.id,
-        source_event_link: event.htmlLink,
+        sourceEventId: event.id,
+        sourceEventLink: event.htmlLink,
         notes: event.description || '',
         workspace: workspaceId,
+        ingestedAt: new Date().toISOString(),
       }, id);
       const next = new Set(createdIds); next.add(event.id);
       setCreatedIds(next);

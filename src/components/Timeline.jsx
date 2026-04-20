@@ -19,6 +19,7 @@ import { logInteraction } from '../data/interactions';
 import InterviewCard from './InterviewCard.jsx';
 import CallCard from './CallCard.jsx';
 import NoteCard from './NoteCard.jsx';
+import { getInterviewDate } from '../lib/interviewFields.js';
 
 const PAGE_SIZE = 20;
 
@@ -85,7 +86,7 @@ export default function Timeline({ entityType, entityId, contactIds, peopleById 
       const pid = personIdForInterview(iv);
       return !!pid && rollUpIds.includes(pid);
     });
-    const sortedOldFirst = [...mine].sort((a, b) => toMs(a.interviewDate || a.createdAt) - toMs(b.interviewDate || b.createdAt));
+    const sortedOldFirst = [...mine].sort((a, b) => toMs(getInterviewDate(a)) - toMs(getInterviewDate(b)));
     const ordinalById = new Map();
     sortedOldFirst.forEach((iv, i) => ordinalById.set(iv.id, i + 1));
     return mine.map((iv) => ({ ...iv, _ordinal: ordinalById.get(iv.id) || 1 }));
@@ -114,7 +115,7 @@ export default function Timeline({ entityType, entityId, contactIds, peopleById 
         return {
           key: `iv-${iv.id}`,
           kind: 'interview',
-          ts: toMs(iv.interviewDate || iv.createdAt),
+          ts: toMs(getInterviewDate(iv)),
           data: iv,
           contactLabel: combinedMode ? labelFor(pid) : null,
         };

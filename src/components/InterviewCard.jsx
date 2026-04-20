@@ -9,6 +9,13 @@ import TranscriptModal from './TranscriptModal.jsx';
 import ContactPickerModal from './ContactPickerModal.jsx';
 import { useCollection } from '../hooks/useCollection';
 import { moveInterview } from '../data/merges';
+import {
+  getInterviewDate,
+  getInterviewSummary,
+  getInterviewHeadline,
+  hasTranscript,
+  hasSummary,
+} from '../lib/interviewFields.js';
 
 function shortDate(value) {
   if (!value) return '—';
@@ -38,14 +45,14 @@ export default function InterviewCard({ interview, ordinal, contactLabel }) {
   const { data: people } = useCollection('people', { enabled: movePickerKind === 'person' });
   const { data: companies } = useCollection('companies', { enabled: movePickerKind === 'company' });
 
-  const dateValue = interview.interviewDate || interview.createdAt;
+  const dateValue = getInterviewDate(interview);
   const auto = interview.dedupResolution?.method === 'auto_merged';
   const autoConfidence = typeof interview.dedupResolution?.confidenceScore === 'number'
     ? Math.round(interview.dedupResolution.confidenceScore)
     : null;
 
-  const summarySnippet = previewText(interview.summaryText || interview.summary || '');
-  const topic = interview.intervieweeName || interview.intervieweeBusinessName || 'Interview';
+  const summarySnippet = previewText(getInterviewSummary(interview) || '');
+  const topic = getInterviewHeadline(interview) || 'Interview';
   const heading = contactLabel
     ? `Interview #${ordinal || 1} · with ${contactLabel}`
     : `Interview #${ordinal || 1}`;
@@ -130,14 +137,14 @@ export default function InterviewCard({ interview, ordinal, contactLabel }) {
       <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button
           onClick={() => setModalMode('transcript')}
-          disabled={!interview.transcriptText && !interview.transcriptUrl}
-          style={cardBtnStyle(!interview.transcriptText && !interview.transcriptUrl)}>
+          disabled={!hasTranscript(interview)}
+          style={cardBtnStyle(!hasTranscript(interview))}>
           📄 View transcript
         </button>
         <button
           onClick={() => setModalMode('summary')}
-          disabled={!interview.summaryText && !interview.summaryUrl}
-          style={cardBtnStyle(!interview.summaryText && !interview.summaryUrl)}>
+          disabled={!hasSummary(interview)}
+          style={cardBtnStyle(!hasSummary(interview))}>
           📝 View summary
         </button>
       </div>

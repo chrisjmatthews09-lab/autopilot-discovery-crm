@@ -4,6 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { COLORS } from '../../config/design-tokens';
 import { useWorkspace } from '../../hooks/useWorkspace';
 import { personPath, companyPath, interviewPath } from '../../config/workspaces';
+import {
+  getIntervieweeName,
+  getIntervieweeBusinessName,
+  getInterviewHeadline,
+  formatInterviewDate,
+} from '../../lib/interviewFields.js';
 
 const NAV_CRM = [
   { id: 'nav-crm-dashboard', label: 'Dashboard', icon: '🏠', path: '/crm', type: 'nav' },
@@ -48,7 +54,20 @@ export default function CommandPalette({ open, onClose, people = [], companies =
       NAV_SETTINGS,
       ...people.filter((p) => inWorkspace(p, 'deal_flow')).map((p) => ({ id: `p-${p.id}`, label: p.name || '(unnamed)', sub: p.company || '', icon: '👤', path: personPath(p), type: p.workspace === 'deal_flow' ? 'practitioner' : 'person', searchText: [p.name, p.company, p.email, p.role].filter(Boolean).join(' ') })),
       ...companies.filter((c) => inWorkspace(c, 'crm')).map((c) => ({ id: `c-${c.id}`, label: c.name || c.company || '(unnamed)', sub: c.industry || '', icon: '🏢', path: companyPath(c), type: c.workspace === 'deal_flow' ? 'firm' : 'company', searchText: [c.name, c.company, c.industry, c.domain, c.website].filter(Boolean).join(' ') })),
-      ...interviews.filter((i) => inWorkspace(i, 'deal_flow')).map((i) => ({ id: `i-${i.id}`, label: i.intervieweeName || i.intervieweeBusinessName || 'Interview', sub: i.interviewDate || '', icon: '🎙', path: interviewPath(i), type: 'interview', searchText: [i.intervieweeName, i.intervieweeBusinessName, i.interviewDate].filter(Boolean).join(' ') })),
+      ...interviews.filter((i) => inWorkspace(i, 'deal_flow')).map((i) => {
+        const name = getIntervieweeName(i);
+        const business = getIntervieweeBusinessName(i);
+        const dateLabel = formatInterviewDate(i) || '';
+        return {
+          id: `i-${i.id}`,
+          label: getInterviewHeadline(i) || 'Interview',
+          sub: dateLabel,
+          icon: '🎙',
+          path: interviewPath(i),
+          type: 'interview',
+          searchText: [name, business, dateLabel, i.title].filter(Boolean).join(' '),
+        };
+      }),
     ];
   }, [people, companies, interviews, workspaceId, global]);
 

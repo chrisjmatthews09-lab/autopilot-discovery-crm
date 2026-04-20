@@ -11,6 +11,17 @@ import { useWorkspace } from './hooks/useWorkspace';
 import { useIngestionProcessor } from './hooks/useIngestionProcessor.js';
 import { retryInterview, enrichAndMergeInterview } from './services/ingestionService.js';
 import { historyForField } from './lib/dedup/enrichmentMerge.js';
+import {
+  getIntervieweeName,
+  getIntervieweeBusinessName,
+  getInterviewHeadline,
+  getInterviewDate,
+  getInterviewTranscript,
+  getInterviewSummary,
+  getInterviewTranscriptUrl,
+  getInterviewSummaryUrl,
+  formatInterviewDate,
+} from './lib/interviewFields.js';
 import { FIRM_ROLES, personPath, companyPath, interviewPath, interviewsListPath } from './config/workspaces';
 import ReferralPartnersList from './pages/ReferralPartners';
 import ReferralPipeline from './pages/ReferralPipeline';
@@ -1146,12 +1157,12 @@ function InterviewsListPage({ interviews, people, companies, workspace = 'deal_f
     if (filter === 'linked' && !iv.linkedRecord) return false;
     if (!search) return true;
     const q = search.toLowerCase();
-    return [iv.intervieweeName, iv.intervieweeBusinessName, iv.linkedRecord?.name]
+    return [getIntervieweeName(iv), getIntervieweeBusinessName(iv), iv.linkedRecord?.name]
       .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
   });
 
   const sorted = [...filtered].sort((a, b) =>
-    String(b.interviewDate || '').localeCompare(String(a.interviewDate || ''))
+    String(getInterviewDate(b) || '').localeCompare(String(getInterviewDate(a) || ''))
   );
 
   const FilterChip = ({ value, label, count }) => (
@@ -1168,10 +1179,10 @@ function InterviewsListPage({ interviews, people, companies, workspace = 'deal_f
   };
 
   const exportColumns = [
-    { header: 'Interviewee', accessor: (r) => r.intervieweeName || r.intervieweeBusinessName || '' },
-    { header: 'Business', accessor: (r) => r.intervieweeBusinessName || '' },
-    { header: 'Date', accessor: (r) => r.interviewDate || '' },
-    { header: 'Status', accessor: (r) => r.status || '' },
+    { header: 'Interviewee', accessor: (r) => getIntervieweeName(r) || getIntervieweeBusinessName(r) || '' },
+    { header: 'Business', accessor: (r) => getIntervieweeBusinessName(r) || '' },
+    { header: 'Date', accessor: (r) => getInterviewDate(r) || '' },
+    { header: 'Dedup', accessor: (r) => r.dedupStatus || '' },
     { header: 'Linked Type', accessor: (r) => r.linkedType || '' },
     { header: 'Linked Name', accessor: (r) => r.linkedRecord?.name || '' },
   ];
@@ -1214,29 +1225,31 @@ function InterviewsListPage({ interviews, people, companies, workspace = 'deal_f
         </div>
       ) : (
         <div style={{ backgroundColor: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr 0.7fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
-            <div>Interviewee</div><div>Date</div><div>Linked To</div><div>Status</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr', padding: '10px 16px', fontSize: 11, fontWeight: 700, color: COLORS.textDim, textTransform: 'uppercase', borderBottom: `1px solid ${COLORS.border}`, backgroundColor: COLORS.cardAlt }}>
+            <div>Interviewee</div><div>Date</div><div>Linked To</div>
           </div>
-          {sorted.map((iv) => (
-            <div key={iv.id} onClick={() => navigate(interviewPath(iv))}
-              style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr 0.7fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
-              <div style={{ fontWeight: 600 }}>
-                {iv.intervieweeName || iv.intervieweeBusinessName || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(unnamed)</span>}
-                <DedupStatusPill status={iv.dedupStatus} />
+          {sorted.map((iv) => {
+            const displayName = getIntervieweeName(iv) || getIntervieweeBusinessName(iv);
+            return (
+              <div key={iv.id} onClick={() => navigate(interviewPath(iv))}
+                style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr', padding: '12px 16px', fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, cursor: 'pointer', alignItems: 'center' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
+                <div style={{ fontWeight: 600 }}>
+                  {displayName || <span style={{ color: COLORS.textDim, fontStyle: 'italic' }}>(unnamed)</span>}
+                  <DedupStatusPill status={iv.dedupStatus} />
+                </div>
+                <div style={{ color: COLORS.textMuted }}>{formatInterviewDate(iv) || '—'}</div>
+                <div style={{ color: COLORS.textMuted }}>
+                  {iv.linkedRecord ? (
+                    <span><span style={{ fontSize: 11, color: COLORS.textDim }}>{iv.linkedType === 'company' ? '🏢' : '👤'}</span> {iv.linkedRecord.name}</span>
+                  ) : (
+                    <span style={{ color: COLORS.warning, fontStyle: 'italic' }}>Unlinked</span>
+                  )}
+                </div>
               </div>
-              <div style={{ color: COLORS.textMuted }}>{iv.interviewDate || '—'}</div>
-              <div style={{ color: COLORS.textMuted }}>
-                {iv.linkedRecord ? (
-                  <span><span style={{ fontSize: 11, color: COLORS.textDim }}>{iv.linkedType === 'company' ? '🏢' : '👤'}</span> {iv.linkedRecord.name}</span>
-                ) : (
-                  <span style={{ color: COLORS.warning, fontStyle: 'italic' }}>Unlinked</span>
-                )}
-              </div>
-              <div><StatusPill status={iv.status} /></div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1333,6 +1346,8 @@ function PipelinePage({ people, companies, onUpdateStatus }) {
 function InterviewTriage({ interview, people, companies, linkPick, setLinkPick, busy, onLinkExisting, onCreateAndLink }) {
   const options = linkPick.type === 'company' ? companies : people;
   const sorted = [...options].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const intervieweeName = getIntervieweeName(interview);
+  const intervieweeBusiness = getIntervieweeBusinessName(interview);
 
   return (
     <div style={{ marginTop: 12, padding: 14, background: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
@@ -1367,13 +1382,13 @@ function InterviewTriage({ interview, people, companies, linkPick, setLinkPick, 
 
       <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 6 }}>Or create a new record from this interview:</div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => onCreateAndLink('person')} disabled={busy || !interview.intervieweeName}
-          style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`, background: '#fff', cursor: busy || !interview.intervieweeName ? 'not-allowed' : 'pointer', fontSize: 12, color: COLORS.text }}>
-          ＋ New Person{interview.intervieweeName ? ` "${interview.intervieweeName}"` : ' (no name)'}
+        <button onClick={() => onCreateAndLink('person')} disabled={busy || !intervieweeName}
+          style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`, background: '#fff', cursor: busy || !intervieweeName ? 'not-allowed' : 'pointer', fontSize: 12, color: COLORS.text }}>
+          ＋ New Person{intervieweeName ? ` "${intervieweeName}"` : ' (no name)'}
         </button>
-        <button onClick={() => onCreateAndLink('company')} disabled={busy || !(interview.intervieweeBusinessName || interview.intervieweeName)}
+        <button onClick={() => onCreateAndLink('company')} disabled={busy || !(intervieweeBusiness || intervieweeName)}
           style={{ padding: '6px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`, background: '#fff', cursor: busy ? 'not-allowed' : 'pointer', fontSize: 12, color: COLORS.text }}>
-          ＋ New Company{interview.intervieweeBusinessName ? ` "${interview.intervieweeBusinessName}"` : ''}
+          ＋ New Company{intervieweeBusiness ? ` "${intervieweeBusiness}"` : ''}
         </button>
       </div>
     </div>
@@ -1383,10 +1398,7 @@ function InterviewTriage({ interview, people, companies, linkPick, setLinkPick, 
 function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate, onLink, onCreatePerson, onCreateCompany, onEnrich }) {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { call, loading: apiLoading } = useAPI();
   const [tab, setTab] = useState('questions');
-  const [fetchingField, setFetchingField] = useState(null);
-  const [fetchError, setFetchError] = useState(null);
   const [linkPick, setLinkPick] = useState({ type: 'person', id: '' });
   const [linkBusy, setLinkBusy] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -1411,25 +1423,10 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
     ? companies.find((c) => c.id === interview.linkedContactId)
     : null;
 
-  const fetchContent = async (field) => {
-    const url = field === 'summaryText' ? interview.summaryUrl : interview.transcriptUrl;
-    if (!url) { setFetchError('No source URL on file.'); return; }
-    setFetchError(null);
-    setFetchingField(field);
-    const result = await call('getDriveContent', { url });
-    setFetchingField(null);
-    if (result && typeof result.content === 'string') {
-      await onUpdate(interview.id, { [field]: result.content });
-    } else {
-      setFetchError('Failed to fetch from Drive.');
-    }
-  };
-
-  const summaryText = interview.summaryText;
-  const transcriptText = interview.transcriptText;
+  const summaryText = getInterviewSummary(interview);
+  const transcriptText = getInterviewTranscript(interview);
   const activeText = tab === 'summary' ? summaryText : transcriptText;
-  const activeField = tab === 'summary' ? 'summaryText' : 'transcriptText';
-  const activeUrl = tab === 'summary' ? interview.summaryUrl : interview.transcriptUrl;
+  const activeUrl = tab === 'summary' ? getInterviewSummaryUrl(interview) : getInterviewTranscriptUrl(interview);
 
   const inferredScriptType = interview.script_type || (interview.linkedType === 'person' ? 'pro' : 'biz');
   const activeScript = scripts.find((s) => s.type === inferredScriptType || s.id === inferredScriptType);
@@ -1474,7 +1471,7 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
       <div style={{ backgroundColor: COLORS.card, borderRadius: 12, padding: 28, border: `1px solid ${COLORS.border}`, marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <h1 style={{ margin: '0 0 4px', color: COLORS.text, fontFamily: DISPLAY, fontSize: 28 }}>
-          {interview.intervieweeName || interview.intervieweeBusinessName || 'Untitled Interview'}
+          {getInterviewHeadline(interview) || 'Untitled Interview'}
         </h1>
         {linkedRecord && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
@@ -1488,7 +1485,8 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
         )}
         </div>
         <div style={{ color: COLORS.textMuted, fontSize: 14, marginBottom: 12 }}>
-          {interview.interviewDate || 'No date'} · <StatusPill status={interview.status} />
+          {formatInterviewDate(interview) || 'No date'}
+          {interview.dedupStatus ? <> · <DedupStatusPill status={interview.dedupStatus} /></> : null}
         </div>
         <DedupResolutionPanel interview={interview} people={people} companies={companies} />
         <div style={{ fontSize: 13, color: COLORS.textMuted }}>
@@ -1524,9 +1522,11 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
               onCreateAndLink={async (kind) => {
                 setLinkBusy(true);
                 const ws = interview?.workspace || 'deal_flow';
+                const seedName = getIntervieweeName(interview);
+                const seedBusiness = getIntervieweeBusinessName(interview);
                 const seed = kind === 'company'
-                  ? { name: interview.intervieweeName || interview.intervieweeBusinessName || '', company: interview.intervieweeBusinessName || '', status: 'new', workspace: ws }
-                  : { name: interview.intervieweeName || '', company: interview.intervieweeBusinessName || '', status: 'new', workspace: ws };
+                  ? { name: seedName || seedBusiness || '', company: seedBusiness || '', status: 'new', workspace: ws }
+                  : { name: seedName || '', company: seedBusiness || '', status: 'new', workspace: ws };
                 const newId = `${kind}-${Date.now()}`;
                 if (kind === 'company') await onCreateCompany({ ...seed, id: newId });
                 else await onCreatePerson({ ...seed, id: newId });
@@ -1591,39 +1591,30 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
               <div className="markdown-body" style={{ fontFamily: FONT, fontSize: 14, lineHeight: 1.6, color: COLORS.text }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeText}</ReactMarkdown>
               </div>
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, display: 'flex', gap: 12, fontSize: 12, color: COLORS.textDim }}>
-                <button onClick={() => fetchContent(activeField)} disabled={fetchingField === activeField}
-                  style={{ background: 'none', border: `1px solid ${COLORS.border}`, padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, color: COLORS.textMuted }}>
-                  {fetchingField === activeField ? 'Refreshing…' : '↻ Refresh from Drive'}
-                </button>
-                {activeUrl && <a href={activeUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary, alignSelf: 'center' }}>Open original ↗</a>}
-              </div>
+              {activeUrl && (
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, fontSize: 12, color: COLORS.textDim }}>
+                  <a href={activeUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Open original in Drive ↗</a>
+                </div>
+              )}
             </>
           ) : (
             <div style={{ textAlign: 'center', padding: 40 }}>
               {activeUrl ? (
                 <>
-                  <p style={{ color: COLORS.textMuted, marginBottom: 16, fontSize: 14 }}>
-                    {tab === 'summary' ? 'Summary' : 'Transcript'} hasn't been loaded yet.
+                  <p style={{ color: COLORS.textMuted, marginBottom: 12, fontSize: 14 }}>
+                    No cached {tab === 'summary' ? 'summary' : 'transcript'} on this interview yet.
                   </p>
-                  <button onClick={() => fetchContent(activeField)} disabled={fetchingField === activeField}
-                    style={{ padding: '10px 20px', background: COLORS.primary, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
-                    {fetchingField === activeField ? 'Loading from Drive…' : `Load ${tab === 'summary' ? 'Summary' : 'Transcript'}`}
-                  </button>
-                  {activeUrl && (
-                    <div style={{ marginTop: 12, fontSize: 12 }}>
-                      <a href={activeUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary }}>Or open original in Drive ↗</a>
-                    </div>
-                  )}
+                  <a href={activeUrl} target="_blank" rel="noreferrer" style={{ color: COLORS.primary, fontSize: 13 }}>
+                    Open original in Drive ↗
+                  </a>
                 </>
               ) : (
                 <div style={{ color: COLORS.textDim, fontStyle: 'italic' }}>
-                  No {tab === 'summary' ? 'summary' : 'transcript'} URL on this interview.
+                  No {tab === 'summary' ? 'summary' : 'transcript'} on this interview.
                 </div>
               )}
             </div>
           )}
-          {fetchError && <div style={{ marginTop: 12, color: COLORS.danger, fontSize: 13 }}>{fetchError}</div>}
         </div>
       </div>
 

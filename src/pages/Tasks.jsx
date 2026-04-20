@@ -5,6 +5,7 @@ import { TASK_STATUSES, TASK_PRIORITIES, TASK_PRIORITY_COLORS } from '../config/
 import { useCollection } from '../hooks/useCollection';
 import { createTask, updateTask, deleteTask, bulkUpdateTasks, isOverdue } from '../data/tasks';
 import { personPath, companyPath, interviewPath } from '../config/workspaces';
+import { getInterviewHeadline } from '../lib/interviewFields.js';
 
 const RELATED_TYPES = [
   { value: 'any', label: 'Any' },
@@ -76,7 +77,7 @@ export default function Tasks({ workspace = null }) {
   const resolveRelated = (t) => {
     if (t.related_person_id && peopleById[t.related_person_id]) { const p = peopleById[t.related_person_id]; return { label: p.name || '(person)', path: personPath(p), icon: '👤' }; }
     if (t.related_company_id && companiesById[t.related_company_id]) { const c = companiesById[t.related_company_id]; return { label: c.name || '(company)', path: companyPath(c), icon: '🏢' }; }
-    if (t.related_interview_id && interviewsById[t.related_interview_id]) { const iv = interviewsById[t.related_interview_id]; return { label: iv.intervieweeName || iv.intervieweeBusinessName || 'Interview', path: interviewPath(iv), icon: '🎙' }; }
+    if (t.related_interview_id && interviewsById[t.related_interview_id]) { const iv = interviewsById[t.related_interview_id]; return { label: getInterviewHeadline(iv) || 'Interview', path: interviewPath(iv), icon: '🎙' }; }
     if (t.related_deal_id && dealsById[t.related_deal_id]) return { label: dealsById[t.related_deal_id].name || '(deal)', path: `/crm/deals/${t.related_deal_id}`, icon: '💼' };
     return null;
   };

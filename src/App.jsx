@@ -22,6 +22,7 @@ import CommandPalette from './components/ui/CommandPalette';
 import Timeline from './components/ui/Timeline';
 import ContactTimeline from './components/Timeline.jsx';
 import CompanyContactsSection from './components/CompanyContactsSection.jsx';
+import MergeContactModal from './components/MergeContactModal.jsx';
 import TasksCard from './components/ui/TasksCard';
 import DealsCard from './components/ui/DealsCard';
 import TargetsCard from './components/ui/TargetsCard';
@@ -830,7 +831,9 @@ function EnrichmentHistorySection({ history }) {
 
 function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], allCompanies = [] }) {
   const cfg = V2_SCHEMA[kind];
+  const navigate = useNavigate();
   const [convertOpen, setConvertOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return null; } };
 
   const CONVERTIBLE = new Set(['Research-Contact', 'Subscriber', 'Lead']);
@@ -854,6 +857,15 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
         || (row.company && norm(p.company) === norm(row.company)));
   }, [kind, row, allPeople]);
   const companyContactIds = useMemo(() => companyContacts.map((p) => p.id), [companyContacts]);
+
+  // Sprint 9 — Candidates for the merge target picker. Same kind, same
+  // workspace, and not the current record itself. Soft-deleted rows are
+  // already filtered out one level up in ContactDetailRoute.
+  const mergeCandidates = useMemo(() => {
+    const pool = kind === 'person' ? allPeople : allCompanies;
+    const ws = row.workspace || 'deal_flow';
+    return pool.filter((c) => c.id !== row.id && (c.workspace || 'deal_flow') === ws);
+  }, [kind, allPeople, allCompanies, row.id, row.workspace]);
   const peopleById = useMemo(() => {
     const map = {};
     companyContacts.forEach((p) => { map[p.id] = p; });
@@ -921,6 +933,7 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
               </button>
             )}
             <button onClick={onEdit} style={{ padding: '8px 14px', backgroundColor: COLORS.blueLight, color: COLORS.blue, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>✎ Edit</button>
+            <button onClick={() => setMergeOpen(true)} style={{ padding: '8px 14px', backgroundColor: COLORS.cardAlt, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, cursor: 'pointer', fontWeight: 600 }} title="Merge into another contact">⇉ Merge</button>
             <button onClick={onDelete} style={{ padding: '8px 14px', backgroundColor: '#FEF2F2', color: COLORS.danger, border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>🗑 Delete</button>
           </div>
         </div>
@@ -1012,6 +1025,21 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
           companies={allCompanies}
           onClose={() => setConvertOpen(false)}
           onDone={() => setConvertOpen(false)}
+        />
+      )}
+      {mergeOpen && (
+        <MergeContactModal
+          sourceContact={row}
+          kind={kind}
+          candidates={mergeCandidates}
+          onClose={() => setMergeOpen(false)}
+          onMerged={(target) => {
+            setMergeOpen(false);
+            const base = kind === 'person'
+              ? ((target.workspace || 'deal_flow') === 'crm' ? '/crm/people' : '/deal-flow/practitioners')
+              : ((target.workspace || 'deal_flow') === 'crm' ? '/crm/companies' : '/deal-flow/firms');
+            navigate(`${base}/${target.id}`);
+          }}
         />
       )}
     </div>
@@ -2220,8 +2248,12 @@ function MainApp({ user, onSignOut }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
 
-  const { data: people, loading: peopleLoading } = useCollection('people', { enabled: !migrating });
-  const { data: companies, loading: companiesLoading } = useCollection('companies', { enabled: !migrating });
+  const { data: peopleRaw, loading: peopleLoading } = useCollection('people', { enabled: !migrating });
+  const { data: companiesRaw, loading: companiesLoading } = useCollection('companies', { enabled: !migrating });
+  // Sprint 9 — Soft-deleted contacts stay in Firestore for undo but never
+  // render in the UI. Filter once at the top and pass the clean list down.
+  const people = useMemo(() => (peopleRaw || []).filter((p) => !p.deletedAt), [peopleRaw]);
+  const companies = useMemo(() => (companiesRaw || []).filter((c) => !c.deletedAt), [companiesRaw]);
   const { data: interviews, loading: interviewsLoading } = useCollection('interviews', { enabled: !migrating });
   const { data: scripts } = useCollection('scripts', { enabled: !migrating });
 

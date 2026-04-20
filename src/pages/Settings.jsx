@@ -6,6 +6,7 @@ import { createTag, renameTag, recolorTag, changeTagScope, removeTag } from '../
 import { createDoc, updateDoc, deleteDoc } from '../data/firestore';
 import { clearStoredToken, connectBoth, connectCalendar, connectGmail, getGoogleConnectionStatus } from '../data/google';
 import { migrateWorkspaceBackfill, migrateDedupFields } from '../data/migrate';
+import { undoMerge } from '../data/merges';
 
 export default function Settings({ user, onSignOut }) {
   return (
@@ -30,6 +31,8 @@ export default function Settings({ user, onSignOut }) {
       <WorkspaceSection />
 
       <DedupBackfillSection />
+
+      <RecentMergesSection />
 
       <TagsSection />
 
@@ -230,6 +233,85 @@ function DedupBackfillSection() {
         </div>
       )}
       {status && <div style={{ marginTop: 10, fontSize: 12, color: COLORS.success }}>{status}</div>}
+      {error && <div style={{ marginTop: 10, fontSize: 12, color: COLORS.danger }}>{error}</div>}
+    </Section>
+  );
+}
+
+// Sprint 9 — Lists manual merges from the last 30 days with an Undo button
+// that uses the stored snapshot on each merge record to fully revert.
+function RecentMergesSection() {
+  const { data: merges, loading } = useCollection('merges');
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(null);
+  const [okMsg, setOkMsg] = useState(null);
+
+  const cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const recent = (merges || [])
+    .filter((m) => new Date(m.mergedAt || m.createdAt || 0).getTime() >= cutoffMs)
+    .sort((a, b) => new Date(b.mergedAt || 0) - new Date(a.mergedAt || 0));
+
+  const handleUndo = async (merge) => {
+    if (!window.confirm(
+      `Undo this merge?\n\nAll ${merge.summary?.interviews || 0} interviews and `
+      + `${merge.summary?.interactions || 0} interactions will move back to the source, `
+      + `and the source contact will be restored.`,
+    )) return;
+    setBusyId(merge.id);
+    setError(null);
+    setOkMsg(null);
+    try {
+      await undoMerge(merge.id);
+      setOkMsg('Merge undone. Source contact restored.');
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Undo failed.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Section title="Recently merged" subtitle="Manual contact merges from the last 30 days. Undo restores the source contact and moves all interviews/notes/calls back.">
+      {loading ? (
+        <div style={{ fontSize: 12, color: COLORS.textMuted }}>Loading…</div>
+      ) : recent.length === 0 ? (
+        <div style={{ fontSize: 12, color: COLORS.textDim, fontStyle: 'italic' }}>No merges in the last 30 days.</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {recent.map((m) => {
+            const sourceName = m.snapshot?.source?.name || m.snapshot?.source?.fullName || m.sourceId;
+            const status = m.status || 'applied';
+            return (
+              <div key={m.id} style={{
+                padding: '10px 12px', border: `1px solid ${COLORS.border}`, borderRadius: 6,
+                background: status === 'undone' ? COLORS.cardAlt : COLORS.card,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+              }}>
+                <div style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 600, color: COLORS.text }}>
+                    {sourceName} → {m.targetId}
+                    {status === 'undone' && <span style={{ marginLeft: 8, color: COLORS.textDim, fontWeight: 400, fontStyle: 'italic' }}>undone</span>}
+                  </div>
+                  <div style={{ color: COLORS.textDim, marginTop: 2 }}>
+                    {m.kind} · {m.summary?.interviews ?? 0} interviews · {m.summary?.interactions ?? 0} interactions · {m.mergedAt ? new Date(m.mergedAt).toLocaleString() : '—'}
+                  </div>
+                </div>
+                {status === 'applied' && (
+                  <button
+                    onClick={() => handleUndo(m)}
+                    disabled={busyId === m.id}
+                    style={{ padding: '6px 12px', background: 'transparent', border: `1px solid ${COLORS.border}`, borderRadius: 5, cursor: busyId === m.id ? 'not-allowed' : 'pointer', fontSize: 12, color: COLORS.text }}
+                  >
+                    {busyId === m.id ? 'Undoing…' : 'Undo'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {okMsg && <div style={{ marginTop: 10, fontSize: 12, color: COLORS.success }}>{okMsg}</div>}
       {error && <div style={{ marginTop: 10, fontSize: 12, color: COLORS.danger }}>{error}</div>}
     </Section>
   );

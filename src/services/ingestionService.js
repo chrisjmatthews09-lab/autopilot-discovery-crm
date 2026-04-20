@@ -89,7 +89,11 @@ export function planResolution(extractedEntity, people, companies) {
   if (!extractedEntity) return { decision: 'error', reason: 'no_extracted_entity' };
 
   const candidate = candidateFromEntity(extractedEntity);
-  const personMatch = findBestMatch(candidate, people, { appType: null });
+  // Sprint 9 (PRD F3) — soft-deleted contacts are kept in Firestore for undo,
+  // but must never participate in dedup matching.
+  const livePeople = (people || []).filter((p) => !p?.deletedAt);
+  const liveCompanies = (companies || []).filter((c) => !c?.deletedAt);
+  const personMatch = findBestMatch(candidate, livePeople, { appType: null });
 
   if (personMatch.tier === 'tier1_email' || personMatch.tier === 'tier2_name_business') {
     return {
@@ -114,7 +118,7 @@ export function planResolution(extractedEntity, people, companies) {
     };
   }
 
-  const companyMatch = findBestCompanyMatch(extractedEntity.businessName, companies);
+  const companyMatch = findBestCompanyMatch(extractedEntity.businessName, liveCompanies);
 
   if (companyMatch.tier === 'tier2_name_business') {
     return {

@@ -10,6 +10,7 @@ import { migrateSheetsToFirestore, hasMigrated, renameCollectionsV2, hasRenamed,
 import { useWorkspace } from './hooks/useWorkspace';
 import { useIngestionProcessor } from './hooks/useIngestionProcessor.js';
 import { retryInterview, enrichAndMergeInterview } from './services/ingestionService.js';
+import { analyzeThemes } from './services/themesService.js';
 import { historyForField } from './lib/dedup/enrichmentMerge.js';
 import {
   getIntervieweeName,
@@ -1840,11 +1841,12 @@ function ThemesPage({ businesses, practitioners }) {
     setBizLoading(true);
     setBizError(null);
     try {
-      const result = await call('analyzeThemes', { type: 'business' });
+      const records = businesses.filter((b) => b.enrichedAt || b.painPoints);
+      const result = await analyzeThemes({ type: 'business', records });
       if (result && result.themes) setBizThemes(result.themes);
-      else setBizError(result?.error || 'Analysis failed — check API key in Settings');
+      else setBizError('Analysis returned no themes.');
     } catch (e) {
-      setBizError(e.message);
+      setBizError(e.message || String(e));
     }
     setBizLoading(false);
   };
@@ -1853,11 +1855,12 @@ function ThemesPage({ businesses, practitioners }) {
     setPracLoading(true);
     setPracError(null);
     try {
-      const result = await call('analyzeThemes', { type: 'practitioner' });
+      const records = practitioners.filter((p) => p.enrichedAt || p.painPoints);
+      const result = await analyzeThemes({ type: 'practitioner', records });
       if (result && result.themes) setPracThemes(result.themes);
-      else setPracError(result?.error || 'Analysis failed — check API key in Settings');
+      else setPracError('Analysis returned no themes.');
     } catch (e) {
-      setPracError(e.message);
+      setPracError(e.message || String(e));
     }
     setPracLoading(false);
   };

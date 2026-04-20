@@ -7,6 +7,33 @@ import { deleteView, parseFilters, encodeFiltersToSearch, VIEW_OBJECT_ICONS, vie
 import { useWorkspace } from '../../hooks/useWorkspace';
 import { WORKSPACES } from '../../config/workspaces';
 
+// Research, Tasks, and Review queue are platform-level — identical in both
+// workspaces. They read from / write to the same global collections, so we
+// render them the same way regardless of which workspace the user is in.
+const SHARED_SECTIONS = [
+  {
+    label: 'Research',
+    items: [
+      { to: '/interviews', label: 'Interviews', icon: '🎙️' },
+      { to: '/insights', label: 'Insights', icon: '🧠' },
+      { to: '/scripts', label: 'Scripts', icon: '📝' },
+    ],
+  },
+  {
+    label: 'Work',
+    items: [
+      { to: '/tasks', label: 'Tasks', icon: '✅', badgeKey: 'overdueTasks' },
+      { to: '/review', label: 'Review queue', icon: '🕵️', badgeKey: 'reviewAll', badgeTone: 'warning' },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
+      { to: '/settings', label: 'Settings', icon: '⚙️' },
+    ],
+  },
+];
+
 const SECTIONS_CRM = [
   {
     label: null,
@@ -22,22 +49,13 @@ const SECTIONS_CRM = [
     ],
   },
   {
-    label: 'Work',
+    label: 'Pipeline',
     items: [
-      { to: '/crm/tasks', label: 'Tasks', icon: '✅', badgeKey: 'overdueTasks' },
       { to: '/crm/deals', label: 'Deals', icon: '💼' },
       { to: '/crm/board', label: 'Board', icon: '📊' },
-      { to: '/crm/interviews', label: 'Interviews', icon: '🎙️' },
-      { to: '/crm/scripts', label: 'Scripts', icon: '📝' },
-      { to: '/review', label: 'Review queue', icon: '🕵️', badgeKey: 'reviewCrm', badgeTone: 'warning' },
     ],
   },
-  {
-    label: 'Admin',
-    items: [
-      { to: '/settings', label: 'Settings', icon: '⚙️' },
-    ],
-  },
+  ...SHARED_SECTIONS,
 ];
 
 const SECTIONS_DEAL_FLOW = [
@@ -62,22 +80,7 @@ const SECTIONS_DEAL_FLOW = [
       { to: '/deal-flow/referrals/pipeline', label: 'Referral Pipeline', icon: '📊' },
     ],
   },
-  {
-    label: 'Research',
-    items: [
-      { to: '/deal-flow/interviews', label: 'Interviews', icon: '🎙️' },
-      { to: '/deal-flow/insights', label: 'Insights', icon: '🧠' },
-      { to: '/deal-flow/scripts', label: 'Scripts', icon: '📝' },
-      { to: '/deal-flow/tasks', label: 'Tasks', icon: '✅', badgeKey: 'overdueTasks' },
-      { to: '/review', label: 'Review queue', icon: '🕵️', badgeKey: 'reviewDealFlow', badgeTone: 'warning' },
-    ],
-  },
-  {
-    label: 'Admin',
-    items: [
-      { to: '/settings', label: 'Settings', icon: '⚙️' },
-    ],
-  },
+  ...SHARED_SECTIONS,
 ];
 
 export default function Sidebar({ user, onSignOut }) {
@@ -88,11 +91,10 @@ export default function Sidebar({ user, onSignOut }) {
   });
   const { id: workspaceId, switchTo, workspace } = useWorkspace();
   const sections = workspaceId === 'deal_flow' ? SECTIONS_DEAL_FLOW : SECTIONS_CRM;
-  const overdueScope = workspaceId === 'deal_flow' ? 'deal_flow' : 'crm';
   const badges = {
-    overdueTasks: tasks.filter((t) => (t.workspace || 'crm') === overdueScope && isOverdue(t)).length,
-    reviewCrm: (reviewItems || []).filter((r) => (r.appType || 'crm') === 'crm').length,
-    reviewDealFlow: (reviewItems || []).filter((r) => r.appType === 'deal_flow').length,
+    // Research + work are now platform-level, so counts are across both workspaces.
+    overdueTasks: tasks.filter((t) => isOverdue(t)).length,
+    reviewAll: (reviewItems || []).length,
   };
   const pinnedViews = (views || [])
     .filter((v) => v.pinned !== false && (!v.workspace || v.workspace === workspaceId))

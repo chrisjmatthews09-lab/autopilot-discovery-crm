@@ -1116,9 +1116,9 @@ function RelatedPanel({ row, kind, allPeople, allCompanies }) {
   );
 }
 
-function InterviewsListPage({ interviews, people, companies, workspace = 'deal_flow' }) {
+function InterviewsListPage({ interviews, people, companies }) {
   const navigate = useNavigate();
-  const peoplePath = workspace === 'crm' ? '/crm/people' : '/deal-flow/practitioners';
+  const peoplePath = '/crm/people';
   const [searchParams, setSearchParams] = useSearchParams();
   const viewParam = searchParams.get('view');
   const [filter, setFilter] = useState(() => readFilter(searchParams, 'filter') || 'all');
@@ -2372,20 +2372,35 @@ function MainApp({ user, onSignOut }) {
       <Route path="/people/:id" element={<LegacyRecordRedirect rows={people} fallback="crm" crmPath="/crm/people" dealFlowPath="/deal-flow/practitioners" />} />
       <Route path="/companies" element={<Navigate to="/crm/companies" replace />} />
       <Route path="/companies/:id" element={<LegacyRecordRedirect rows={companies} fallback="crm" crmPath="/crm/companies" dealFlowPath="/deal-flow/firms" />} />
-      <Route path="/interviews" element={<Navigate to="/deal-flow/interviews" replace />} />
-      <Route path="/interviews/:id" element={<LegacyRecordRedirect rows={interviews} fallback="deal_flow" crmPath="/crm/interviews" dealFlowPath="/deal-flow/interviews" />} />
-      <Route path="/tasks" element={<Navigate to="/crm/tasks" replace />} />
+      {/* Research + Tasks + Review are platform-level (see Sidebar). */}
+      <Route path="/interviews" element={
+        <InterviewsListPage interviews={interviews} people={people} companies={companies} />
+      } />
+      <Route path="/interviews/:id" element={
+        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} scripts={scripts} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} onEnrich={handleEnrichContact} />
+      } />
+      <Route path="/insights" element={<ThemesPage businesses={companies} practitioners={people} />} />
+      <Route path="/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} />} />
+      <Route path="/tasks" element={<Tasks />} />
+      {/* Legacy workspace-scoped research paths → canonical. */}
+      <Route path="/crm/interviews" element={<Navigate to="/interviews" replace />} />
+      <Route path="/crm/interviews/:id" element={<LegacyPrefixRedirect prefix="/interviews" />} />
+      <Route path="/deal-flow/interviews" element={<Navigate to="/interviews" replace />} />
+      <Route path="/deal-flow/interviews/:id" element={<LegacyPrefixRedirect prefix="/interviews" />} />
+      <Route path="/crm/tasks" element={<Navigate to="/tasks" replace />} />
+      <Route path="/deal-flow/tasks" element={<Navigate to="/tasks" replace />} />
+      <Route path="/crm/scripts" element={<Navigate to="/scripts" replace />} />
+      <Route path="/deal-flow/scripts" element={<Navigate to="/scripts" replace />} />
+      <Route path="/deal-flow/insights" element={<Navigate to="/insights" replace />} />
+      <Route path="/themes" element={<Navigate to="/insights" replace />} />
+      <Route path="/scripts/pro" element={<Navigate to="/scripts?type=pro" replace />} />
+      <Route path="/scripts/biz" element={<Navigate to="/scripts?type=biz" replace />} />
       <Route path="/deals" element={<Navigate to="/crm/deals" replace />} />
       <Route path="/deals/:id" element={<LegacyPrefixRedirect prefix="/crm/deals" />} />
       <Route path="/targets" element={<Navigate to="/deal-flow/targets" replace />} />
       <Route path="/targets/:id" element={<LegacyPrefixRedirect prefix="/deal-flow/targets" />} />
       <Route path="/board" element={<Navigate to="/crm/board" replace />} />
       <Route path="/pipeline" element={<Navigate to="/crm/board" replace />} />
-      <Route path="/insights" element={<Navigate to="/deal-flow/insights" replace />} />
-      <Route path="/themes" element={<Navigate to="/deal-flow/insights" replace />} />
-      <Route path="/scripts" element={<Navigate to="/deal-flow/scripts" replace />} />
-      <Route path="/scripts/pro" element={<Navigate to="/deal-flow/scripts" replace />} />
-      <Route path="/scripts/biz" element={<Navigate to="/crm/scripts" replace />} />
 
       {/* ───── CRM workspace ───── */}
       <Route path="/crm" element={
@@ -2411,13 +2426,6 @@ function MainApp({ user, onSignOut }) {
           transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact}
           allPeople={people} allCompanies={companies} />
       } />
-      <Route path="/crm/interviews" element={
-        <InterviewsListPage interviews={interviewsCrm} people={peopleCrm} companies={companiesCrm} workspace="crm" />
-      } />
-      <Route path="/crm/interviews/:id" element={
-        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} scripts={scripts} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} onEnrich={handleEnrichContact} />
-      } />
-      <Route path="/crm/tasks" element={<Tasks workspace="crm" />} />
       <Route path="/crm/deals" element={<DealsList workspace="crm" />} />
       <Route path="/crm/deals/:id" element={<DealDetail />} />
       <Route path="/crm/board" element={
@@ -2448,13 +2456,6 @@ function MainApp({ user, onSignOut }) {
           transcripts={interviews} onDelete={handleDeleteCompany} onEnrich={handleEnrichContact}
           allPeople={people} allCompanies={companies} />
       } />
-      <Route path="/deal-flow/interviews" element={
-        <InterviewsListPage interviews={interviewsDf} people={peopleDf} companies={firms} workspace="deal_flow" />
-      } />
-      <Route path="/deal-flow/interviews/:id" element={
-        <InterviewDetailRoute interviews={interviews} people={people} companies={companies} scripts={scripts} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} onEnrich={handleEnrichContact} />
-      } />
-      <Route path="/deal-flow/tasks" element={<Tasks workspace="deal_flow" />} />
       <Route path="/deal-flow/targets" element={<TargetsList />} />
       <Route path="/deal-flow/targets/:id" element={<TargetDetail />} />
       <Route path="/deal-flow/referrals" element={
@@ -2463,9 +2464,6 @@ function MainApp({ user, onSignOut }) {
       <Route path="/deal-flow/referrals/pipeline" element={
         <ReferralPipeline firms={firms} loading={loading} onUpdateCompany={handleUpdateCompany} />
       } />
-      <Route path="/deal-flow/insights" element={<ThemesPage businesses={companiesCrm} practitioners={peopleDf} />} />
-      <Route path="/deal-flow/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} workspace="deal_flow" />} />
-      <Route path="/crm/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} workspace="crm" />} />
 
       {/* ───── Global ───── */}
       <Route path="/review" element={<DedupReviewQueue />} />

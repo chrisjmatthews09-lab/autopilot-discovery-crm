@@ -46,13 +46,16 @@ export function companyPath(company) {
   return ws === 'deal_flow' ? `/deal-flow/firms/${company.id}` : `/crm/companies/${company.id}`;
 }
 
+// Interviews, Insights, Scripts, Tasks, and Review Queue are platform-level —
+// they live at canonical paths and aren't duplicated per workspace. The
+// `interview` argument is accepted (and ignored) to keep the call sites
+// symmetric with personPath/companyPath.
 export function interviewPath(interview) {
-  const ws = interview?.workspace || 'deal_flow';
-  return ws === 'deal_flow' ? `/deal-flow/interviews/${interview.id}` : `/crm/interviews/${interview.id}`;
+  return `/interviews/${interview.id}`;
 }
 
-export function interviewsListPath(workspaceId) {
-  return workspaceId === 'deal_flow' ? '/deal-flow/interviews' : '/crm/interviews';
+export function interviewsListPath(/* workspaceId */) {
+  return '/interviews';
 }
 
 // Referral Partner pipeline — lightweight kanban inside Deal Flow.

@@ -26,6 +26,25 @@
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { overflow: hidden; }
+
+      /* Accessibility — visible keyboard focus ring. `:focus-visible` keeps the
+         ring off mouse clicks but always on tab navigation. Color lifted from
+         the design-token `primary` so the ring matches the theme. */
+      :focus { outline: none; }
+      :focus-visible {
+        outline: 2px solid #3A47B8;
+        outline-offset: 2px;
+        border-radius: 3px;
+      }
+      /* Respect users who've asked the OS to reduce motion. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
       .markdown-body h1 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; }
       .markdown-body h2 { font-size: 18px; font-weight: 700; margin: 18px 0 8px; }
       .markdown-body h3 { font-size: 15px; font-weight: 700; margin: 14px 0 6px; }
@@ -45,10 +64,10 @@
       .markdown-body a { color: #1A5C3A; text-decoration: underline; }
       .markdown-body hr { border: none; border-top: 1px solid #E7E5E0; margin: 16px 0; }
     </style>
-    <script type="module" crossorigin src="/assets/index-CXg3Oebr.js"></script>
+    <script type="module" crossorigin src="/assets/index-DBj_Ri3d.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/react-vendor-DsMsLKas.js">
     <link rel="modulepreload" crossorigin href="/assets/markdown-vendor-1JHWzs6i.js">
-    <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-BF6veOxY.js">
+    <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-DgXGmnrm.js">
   </head>
   <body>
     <div id="root"></div>

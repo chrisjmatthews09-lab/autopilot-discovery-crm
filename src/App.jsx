@@ -65,42 +65,12 @@ import FilterBar from './components/table/FilterBar';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import MobileNav from './components/layout/MobileNav';
-import { MOBILE_NAV_HEIGHT } from './config/design-tokens';
+import { COLORS, FONT, DISPLAY, MOBILE_NAV_HEIGHT } from './config/design-tokens';
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const SettingsPageNew = lazy(() => import('./pages/Settings'));
 const ScriptsWrapper = lazy(() => import('./pages/Scripts'));
 const DedupReviewQueue = lazy(() => import('./pages/DedupReviewQueue'));
 import PageSkeleton from './components/ui/PageSkeleton';
-
-// ==================== CONSTANTS ====================
-const COLORS = {
-  bg: "#F8F6F1",
-  card: "#FFFFFF",
-  cardAlt: "#FDFCF9",
-  primary: "#1A5C3A",
-  primaryLight: "#E8F5EE",
-  accent: "#C4552D",
-  accentLight: "#FFF0EB",
-  blue: "#2563A0",
-  blueLight: "#EBF3FC",
-  purple: "#6B4FA0",
-  purpleLight: "#F3EFFE",
-  gold: "#9A7B2C",
-  goldLight: "#FBF6E8",
-  text: "#1C1917",
-  textMuted: "#78716C",
-  textDim: "#78716C",
-  sidebar: "#FDFCF9",
-  border: "#E7E5E0",
-  borderDark: "#D6D3CD",
-  success: "#16A34A",
-  warning: "#D97706",
-  danger: "#DC2626",
-};
-
-const FONT = `'Karla', 'Nunito Sans', sans-serif`;
-const DISPLAY = `'Fraunces', 'Playfair Display', serif`;
-
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz89C4C15E1Cxmux8bWUWw04pghxiGlqkfb2Ulr_8FMZdnIZ9vcNEakdrGo3zNLhAZV/exec';
 

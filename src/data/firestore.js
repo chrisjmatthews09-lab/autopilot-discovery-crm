@@ -76,3 +76,11 @@ export async function batchWrite(operations) {
   }
   await batch.commit();
 }
+
+// Pre-allocate a Firestore-valid random doc id without writing anything.
+// Used when we need to include a newly-created doc in a batchWrite (where every
+// op requires an id upfront) — e.g. the merge-record doc written alongside the
+// person/company mutations in mergeContacts.
+export function genId(collectionName) {
+  return doc(collection(db, collPath(collectionName))).id;
+}

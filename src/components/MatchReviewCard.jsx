@@ -4,7 +4,11 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { COLORS, DISPLAY, FONT } from '../config/design-tokens';
-import { callClaude } from '../services/claudeService.js';
+import { callClaude, composeSystem } from '../services/claudeService.js';
+
+const REVIEW_SYSTEM = composeSystem(
+  'You are summarizing a dedup match decision for a human reviewer. Return a short paragraph, no JSON.',
+);
 import { buildReviewSummaryPrompt } from '../prompts/reviewSummary.js';
 import { resolveReview } from '../services/ingestionService.js';
 import { getDoc } from '../data/firestore.js';
@@ -82,7 +86,7 @@ export default function MatchReviewCard({ item, interview, existingContact, exis
             triggerReason: item.triggerReason,
           },
         });
-        const { text } = await callClaude(prompt, { temperature: 0.2, maxTokens: 400 });
+        const { text } = await callClaude(prompt, { system: REVIEW_SYSTEM, temperature: 0.2, maxTokens: 400 });
         if (!cancelled) setClaudeText(text.trim());
       } catch (err) {
         if (!cancelled) setClaudeError(err?.message || String(err));

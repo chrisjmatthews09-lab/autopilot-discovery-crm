@@ -6,13 +6,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // ── Firebase / Firestore mocks ─────────────────────────────────────────────
-// genId inside the service calls fbDoc(db, ...).id — we return a fresh id
-// every call so generated person/company/review ids don't collide.
+// genId inside the service calls fbDoc(fbCollection(db, ...)).id — we return a
+// fresh id every call so generated person/company/review ids don't collide.
+// Spread-pattern preserves every other real firebase/firestore export (collection,
+// getDocs, query, etc.) so unrelated ingestionService imports don't blow up.
 let idCounter = 0;
-vi.mock('firebase/firestore', () => ({
-  doc: () => ({ id: `gen-${++idCounter}` }),
-  serverTimestamp: () => '__SERVER_TS__',
-}));
+vi.mock('firebase/firestore', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    collection: () => ({ __mock: 'coll' }),
+    doc: () => ({ id: `gen-${++idCounter}` }),
+    serverTimestamp: () => '__SERVER_TS__',
+  };
+});
 
 vi.mock('../../config/firebase.js', () => ({
   db: { __mock: 'db' },

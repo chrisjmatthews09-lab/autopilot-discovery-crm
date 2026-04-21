@@ -12,7 +12,8 @@
 //     off to a different contact; logs the event on both contacts'
 //     enrichmentHistory.
 
-import { getDoc, updateDoc, createDoc, listDocs } from './firestore';
+import { getDoc, updateDoc, createDoc, listDocs, batchWrite, genId } from './firestore';
+import { serverTimestamp } from 'firebase/firestore';
 import { appendEnrichmentEvent } from '../lib/dedup/enrichmentMerge.js';
 
 const MERGES_COLLECTION = 'merges';
@@ -117,8 +118,18 @@ export async function mergeContacts({ sourceId, targetId, kind }) {
     },
   };
 
+  // All writes below commit atomically via a single Firestore batch. If any
+  // one mutation fails (permissions, concurrent delete, offline), nothing lands
+  // — previously these were sequential updateDoc() calls and a partial failure
+  // could strand interviews on a soft-deleted source with no undo record.
+  //
+  // Firestore caps a batch at 500 ops. A merge of interviews + interactions +
+  // 2 contact docs + 1 merges record realistically stays well under that; if
+  // someone ever hits the limit we'd need to chunk.
+  const ops = [];
+
   // 1. Move interviews: linkedContactId → target, dedupResolution → target too.
-  await Promise.all(interviews.map(async (iv) => {
+  for (const iv of interviews) {
     const patch = {};
     if (iv.linkedType === kind && iv.linkedContactId === sourceId) {
       patch.linkedContactId = targetId;
@@ -131,13 +142,20 @@ export async function mergeContacts({ sourceId, targetId, kind }) {
       if (kind === 'person') patch.dedupResolution.matchedContactId = targetId;
       if (kind === 'company') patch.dedupResolution.matchedBusinessId = targetId;
     }
-    if (Object.keys(patch).length) await updateDoc('interviews', iv.id, patch);
-  }));
+    if (Object.keys(patch).length) {
+      ops.push({ collection: 'interviews', id: iv.id, type: 'update', data: patch });
+    }
+  }
 
   // 2. Move interactions (calls/notes/stage_change/etc).
-  await Promise.all(interactions.map((it) => updateDoc('interactions', it.id, {
-    entity_id: targetId,
-  })));
+  for (const it of interactions) {
+    ops.push({
+      collection: 'interactions',
+      id: it.id,
+      type: 'update',
+      data: { entity_id: targetId },
+    });
+  }
 
   // 3. Merge enrichment fields: target wins, source fills gaps.
   const enrichmentPatch = pickMergeableFields(source, target);
@@ -153,34 +171,54 @@ export async function mergeContacts({ sourceId, targetId, kind }) {
   const mergedFromIds = Array.isArray(target.mergedFromContactIds) ? [...target.mergedFromContactIds] : [];
   if (!mergedFromIds.includes(sourceId)) mergedFromIds.push(sourceId);
 
-  await updateDoc(collectionName, targetId, {
-    ...enrichmentPatch,
-    mergedFromContactIds: mergedFromIds,
-    enrichmentHistory: nextHistory,
-  });
-
-  // 4. Soft-delete source.
-  await updateDoc(collectionName, sourceId, {
-    deletedAt: new Date().toISOString(),
-    mergedIntoContactId: targetId,
-  });
-
-  // 5. Record the merge so it can be listed + undone.
-  const record = await createDoc(MERGES_COLLECTION, {
-    kind,
-    sourceId,
-    targetId,
-    mergedAt: new Date().toISOString(),
-    status: 'applied',
-    snapshot,
-    summary: {
-      interviews: interviews.length,
-      interactions: interactions.length,
-      fields: Object.keys(enrichmentPatch).length,
+  ops.push({
+    collection: collectionName,
+    id: targetId,
+    type: 'update',
+    data: {
+      ...enrichmentPatch,
+      mergedFromContactIds: mergedFromIds,
+      enrichmentHistory: nextHistory,
     },
   });
 
-  return { mergeId: record.id, snapshot };
+  // 4. Soft-delete source.
+  ops.push({
+    collection: collectionName,
+    id: sourceId,
+    type: 'update',
+    data: {
+      deletedAt: new Date().toISOString(),
+      mergedIntoContactId: targetId,
+    },
+  });
+
+  // 5. Record the merge so it can be listed + undone. Pre-allocate the doc
+  //    id so it can ride along in the same batch as the mutations it describes.
+  const mergeId = genId(MERGES_COLLECTION);
+  ops.push({
+    collection: MERGES_COLLECTION,
+    id: mergeId,
+    type: 'set',
+    data: {
+      kind,
+      sourceId,
+      targetId,
+      mergedAt: new Date().toISOString(),
+      status: 'applied',
+      snapshot,
+      summary: {
+        interviews: interviews.length,
+        interactions: interactions.length,
+        fields: Object.keys(enrichmentPatch).length,
+      },
+      createdAt: serverTimestamp(),
+    },
+  });
+
+  await batchWrite(ops);
+
+  return { mergeId, snapshot };
 }
 
 /**
@@ -195,28 +233,52 @@ export async function undoMerge(mergeId) {
   if (!snapshot) throw new Error('merge has no snapshot — undo impossible');
   const collectionName = kind === 'person' ? 'people' : 'companies';
 
+  // Read target first (needed to compute enrichmentHistory rollback), then
+  // commit every reversal in one batch so a partial undo can't leave the
+  // system half-restored.
+  const target = await getDoc(collectionName, targetId);
+  const ops = [];
+
   // 1. Interviews back.
-  await Promise.all((snapshot.interviews || []).map((iv) => updateDoc('interviews', iv.id, {
-    linkedType: iv.linkedType || null,
-    linkedContactId: iv.linkedContactId || null,
-    dedupResolution: iv.dedupResolution || null,
-  })));
+  for (const iv of snapshot.interviews || []) {
+    ops.push({
+      collection: 'interviews',
+      id: iv.id,
+      type: 'update',
+      data: {
+        linkedType: iv.linkedType || null,
+        linkedContactId: iv.linkedContactId || null,
+        dedupResolution: iv.dedupResolution || null,
+      },
+    });
+  }
 
   // 2. Interactions back.
-  await Promise.all((snapshot.interactions || []).map((it) => updateDoc('interactions', it.id, {
-    entity_type: it.entity_type,
-    entity_id: it.entity_id,
-  })));
+  for (const it of snapshot.interactions || []) {
+    ops.push({
+      collection: 'interactions',
+      id: it.id,
+      type: 'update',
+      data: {
+        entity_type: it.entity_type,
+        entity_id: it.entity_id,
+      },
+    });
+  }
 
   // 3. Restore source document (un-delete, drop mergedIntoContactId).
-  await updateDoc(collectionName, sourceId, {
-    deletedAt: null,
-    mergedIntoContactId: null,
+  ops.push({
+    collection: collectionName,
+    id: sourceId,
+    type: 'update',
+    data: {
+      deletedAt: null,
+      mergedIntoContactId: null,
+    },
   });
 
   // 4. Remove source from target.mergedFromContactIds + roll back the
   //    history event we added.
-  const target = await getDoc(collectionName, targetId);
   if (target) {
     const restoredIds = (snapshot.prevTarget?.mergedFromContactIds) || [];
     const history = Array.isArray(target.enrichmentHistory) ? [...target.enrichmentHistory] : [];
@@ -224,17 +286,29 @@ export async function undoMerge(mergeId) {
       e?.source === 'manual_merge' && e?.mergedFromContactId === sourceId
     ));
     if (idx !== -1) history.splice(history.length - 1 - idx, 1);
-    await updateDoc(collectionName, targetId, {
-      mergedFromContactIds: restoredIds,
-      enrichmentHistory: history,
+    ops.push({
+      collection: collectionName,
+      id: targetId,
+      type: 'update',
+      data: {
+        mergedFromContactIds: restoredIds,
+        enrichmentHistory: history,
+      },
     });
   }
 
   // 5. Mark the merge record as undone (keeps the audit trail).
-  await updateDoc(MERGES_COLLECTION, mergeId, {
-    status: 'undone',
-    undoneAt: new Date().toISOString(),
+  ops.push({
+    collection: MERGES_COLLECTION,
+    id: mergeId,
+    type: 'update',
+    data: {
+      status: 'undone',
+      undoneAt: new Date().toISOString(),
+    },
   });
+
+  await batchWrite(ops);
 
   return { ok: true };
 }

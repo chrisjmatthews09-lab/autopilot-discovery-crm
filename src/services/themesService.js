@@ -2,7 +2,11 @@
 // Replaces the legacy Apps Script `analyzeThemes` endpoint so the whole
 // Claude flow goes through VITE_CLAUDE_API_KEY.
 
-import { callClaude, parseJsonStrict } from './claudeService.js';
+import { callClaude, parseJsonStrict, composeSystem } from './claudeService.js';
+
+const THEMES_SYSTEM = composeSystem(
+  'You are synthesizing cross-interview patterns across multiple discovery interviews into one JSON object.',
+);
 
 const BIZ_FIELDS = [
   'name', 'industry', 'location', 'revenue', 'employees', 'yearsInBusiness',
@@ -103,11 +107,14 @@ export async function analyzeThemes({ type, records }) {
   const slim = records.map((r) => slimRecord(r, fields));
   const prompt = type === 'practitioner' ? buildPractitionerPrompt(slim) : buildBusinessPrompt(slim);
 
-  const first = await callClaude(prompt, { temperature: 0.2, maxTokens: 3000 });
+  const first = await callClaude(prompt, { system: THEMES_SYSTEM, temperature: 0.2, maxTokens: 3000 });
   try {
     return { themes: parseJsonStrict(first.text) };
   } catch (firstErr) {
-    const retry = await callClaude(`${prompt}\n\nReturn ONLY valid JSON, no prose.`, { temperature: 0, maxTokens: 3000 });
+    const retry = await callClaude(
+      `${prompt}\n\nReturn ONLY valid JSON, no prose.`,
+      { system: THEMES_SYSTEM, temperature: 0, maxTokens: 3000 },
+    );
     return { themes: parseJsonStrict(retry.text) };
   }
 }

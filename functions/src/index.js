@@ -22,6 +22,9 @@ setGlobalOptions({ region: 'us-central1', maxInstances: 5 });
 initializeApp();
 const db = getFirestore();
 
+// Callable Claude proxy — keeps the Anthropic key out of the client bundle.
+export { callClaude } from './claudeProxy.js';
+
 const INGESTION_SECRET = defineSecret('INGESTION_SECRET');
 const OWNER_UID = defineSecret('OWNER_UID');
 

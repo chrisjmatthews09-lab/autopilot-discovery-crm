@@ -6,7 +6,7 @@ export const WORKSPACES = {
     icon: '💼',
     routePrefix: '/crm',
     defaultPath: '/crm',
-    accent: '#3B82F6',
+    accent: '#2E48AE',
   },
   deal_flow: {
     id: 'deal_flow',

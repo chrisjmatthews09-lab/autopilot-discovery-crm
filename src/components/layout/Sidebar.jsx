@@ -124,11 +124,11 @@ export default function Sidebar({ user, onSignOut }) {
           fontWeight: 800,
           margin: 0,
           letterSpacing: '-0.01em',
-          fontFamily: '"Times New Roman", Georgia, serif',
+          fontFamily: `'Fraunces', 'Playfair Display', 'Times New Roman', Georgia, serif`,
           lineHeight: 1,
         }}>
           <span style={{ color: '#000000' }}>Autopilot</span>{' '}
-          <span style={{ color: '#1E3A8A' }}>Accounting</span>
+          <span style={{ color: '#2E48AE' }}>Accounting</span>
         </h1>
       </div>
 

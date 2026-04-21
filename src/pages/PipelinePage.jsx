@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { COLORS, DISPLAY } from '../config/design-tokens';
-import { V2_SCHEMA } from './ContactPage';
+import { V2_SCHEMA, schemaFor } from './ContactPage';
 
 export default function PipelinePage({ people, companies, onUpdateStatus }) {
   const navigate = useNavigate();

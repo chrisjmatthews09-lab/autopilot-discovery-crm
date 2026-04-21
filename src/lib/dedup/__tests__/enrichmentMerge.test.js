@@ -106,11 +106,11 @@ describe('mergeEnrichment', () => {
   it('reports filled on an array field when existing is absent/empty', () => {
     const out = mergeEnrichment(
       {},
-      { techStack: ['QBO', 'Ramp'] },
+      { softwareStack: ['QBO', 'Ramp'] },
       'iv-7',
       { at: AT },
     );
-    expect(out.merged.techStack).toEqual(['QBO', 'Ramp']);
+    expect(out.merged.softwareStack).toEqual(['QBO', 'Ramp']);
     expect(out.enrichmentEvent.changes[0].action).toBe('filled');
   });
 

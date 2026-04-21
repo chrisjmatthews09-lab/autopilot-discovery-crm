@@ -59,7 +59,7 @@ export default function TasksCard({ entityType, entityId, recordLabel = 'record'
   };
 
   return (
-    <div style={{ marginTop: 20, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14 }}>
+    <div id="tasks" style={{ marginTop: 20, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14, scrollMarginTop: 80 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>✅ Tasks <span style={{ color: COLORS.textMuted, fontWeight: 400, fontSize: 12 }}>({visible.length}{doneCount > 0 && ` · ${doneCount} done`})</span></div>
         {doneCount > 0 && (

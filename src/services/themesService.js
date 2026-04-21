@@ -11,12 +11,12 @@ const THEMES_SYSTEM = composeSystem(
 const BIZ_FIELDS = [
   'name', 'industry', 'location', 'revenue', 'employees', 'yearsInBusiness',
   'currentAccounting', 'monthsBehind', 'currentSpend',
-  'painPoints', 'techStack', 'goals', 'constraints', 'quotableLines', 'summary',
+  'painPoints', 'softwareStack', 'goals', 'constraints', 'quotableLines', 'summary',
 ];
 
 const PRAC_FIELDS = [
   'name', 'company', 'role', 'firmSize', 'yearsInPractice', 'clientCount',
-  'clientTypes', 'avgClientRevenue', 'specialties', 'softwareStack',
+  'clientTypes', 'avgClientRevenue', 'specialties', 'serviceLines', 'softwareStack',
   'painPoints', 'goals', 'constraints', 'quotableLines', 'summary',
 ];
 

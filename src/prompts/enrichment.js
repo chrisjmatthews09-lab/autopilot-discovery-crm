@@ -88,7 +88,7 @@ Extract the structured data described below.
 Rules:
 - Only include a value if it is clearly stated or clearly implied in THIS transcript. Don't copy values from <prior_enrichment> — that's shown only so you know what's already on file.
 - For any field you're unsure about, set the value to null. It's much better to say "null" than to guess.
-- For array fields (painPoints, techStack, goals, etc.), only include items the interviewee actually mentioned. Drop filler. No duplicates.
+- For array fields (painPoints, softwareStack, goals, etc.), only include items the interviewee actually mentioned. Drop filler. No duplicates.
 - For every field that has a \`*Confidence\` counterpart in the schema, return a confidence in 0-100 reflecting how clearly the interviewee stated the value:
     100 = explicitly stated and unambiguous
     70-99 = stated once, clear
@@ -110,6 +110,8 @@ const BUSINESS_OWNER_SCHEMA = `{
   "industry": string | null,
   "industryConfidence": number,
   "location": string | null,
+  "email": string | null,
+  "phone": string | null,
   "revenue": string | null,
   "revenueConfidence": number,
   "employees": number | null,
@@ -120,7 +122,7 @@ const BUSINESS_OWNER_SCHEMA = `{
   "monthsBehind": number | null,
   "currentSpend": string | null,
   "painPoints": string[],
-  "techStack": string[],
+  "softwareStack": string[],
   "goals": string[],
   "constraints": string[],
   "quotableLines": string[],
@@ -129,10 +131,18 @@ const BUSINESS_OWNER_SCHEMA = `{
 
 const PRACTITIONER_SCHEMA = `{
   "summary": string | null,
+  "email": string | null,
+  "phone": string | null,
   "role": string | null,
   "roleConfidence": number,
   "firmSize": string | null,
   "firmSizeConfidence": number,
+  "revenue": string | null,
+  "revenueConfidence": number,
+  "employees": number | null,
+  "employeesConfidence": number,
+  "yearsInBusiness": number | null,
+  "yearsInBusinessConfidence": number,
   "yearsInPractice": number | null,
   "yearsInPracticeConfidence": number,
   "clientCount": number | null,
@@ -141,6 +151,7 @@ const PRACTITIONER_SCHEMA = `{
   "avgClientRevenue": string | null,
   "avgClientRevenueConfidence": number,
   "specialties": string[],
+  "serviceLines": string[],
   "softwareStack": string[],
   "painPoints": string[],
   "goals": string[],
@@ -157,11 +168,12 @@ export const BUSINESS_OWNER_FIELDS = Object.freeze([
   'summary',
   'industry', 'industryConfidence',
   'location',
+  'email', 'phone',
   'revenue', 'revenueConfidence',
   'employees', 'employeesConfidence',
   'yearsInBusiness', 'yearsInBusinessConfidence',
   'currentAccounting', 'monthsBehind', 'currentSpend',
-  'painPoints', 'techStack', 'goals', 'constraints', 'quotableLines',
+  'painPoints', 'softwareStack', 'goals', 'constraints', 'quotableLines',
   'overallConfidence',
 ]);
 
@@ -170,13 +182,17 @@ export const BUSINESS_OWNER_FIELDS = Object.freeze([
  */
 export const PRACTITIONER_FIELDS = Object.freeze([
   'summary',
+  'email', 'phone',
   'role', 'roleConfidence',
   'firmSize', 'firmSizeConfidence',
+  'revenue', 'revenueConfidence',
+  'employees', 'employeesConfidence',
+  'yearsInBusiness', 'yearsInBusinessConfidence',
   'yearsInPractice', 'yearsInPracticeConfidence',
   'clientCount', 'clientCountConfidence',
   'clientTypes',
   'avgClientRevenue', 'avgClientRevenueConfidence',
-  'specialties', 'softwareStack',
+  'specialties', 'serviceLines', 'softwareStack',
   'painPoints', 'goals', 'constraints', 'quotableLines',
   'overallConfidence',
 ]);
@@ -189,6 +205,7 @@ export const PRACTITIONER_FIELDS = Object.freeze([
  * firm and go on the company record when one exists.
  */
 export const PRACTITIONER_PERSON_FIELDS = Object.freeze([
+  'email', 'phone',
   'role', 'roleConfidence',
   'painPoints', 'goals', 'constraints', 'quotableLines',
   'summary',
@@ -199,11 +216,14 @@ export const PRACTITIONER_PERSON_FIELDS = Object.freeze([
  */
 export const PRACTITIONER_COMPANY_FIELDS = Object.freeze([
   'firmSize', 'firmSizeConfidence',
+  'revenue', 'revenueConfidence',
+  'employees', 'employeesConfidence',
+  'yearsInBusiness', 'yearsInBusinessConfidence',
   'yearsInPractice', 'yearsInPracticeConfidence',
   'clientCount', 'clientCountConfidence',
   'clientTypes',
   'avgClientRevenue', 'avgClientRevenueConfidence',
-  'specialties', 'softwareStack',
+  'specialties', 'serviceLines', 'softwareStack',
 ]);
 
 /**
@@ -211,11 +231,11 @@ export const PRACTITIONER_COMPANY_FIELDS = Object.freeze([
  */
 export const ARRAY_FIELDS = Object.freeze([
   'painPoints',
-  'techStack',
   'goals',
   'constraints',
   'quotableLines',
   'clientTypes',
   'specialties',
+  'serviceLines',
   'softwareStack',
 ]);

@@ -14,18 +14,18 @@ import { useConfirm } from '../ui/ConfirmDialog';
 // render them the same way regardless of which workspace the user is in.
 const SHARED_SECTIONS = [
   {
+    label: 'Work',
+    items: [
+      { to: '/tasks', label: 'Tasks', icon: '✅', badgeKey: 'overdueTasks' },
+      { to: '/review', label: 'Review queue', icon: '🕵️', badgeKey: 'reviewAll', badgeTone: 'warning' },
+    ],
+  },
+  {
     label: 'Research',
     items: [
       { to: '/interviews', label: 'Interviews', icon: '🎙️' },
       { to: '/insights', label: 'Insights', icon: '🧠' },
       { to: '/scripts', label: 'Scripts', icon: '📝' },
-    ],
-  },
-  {
-    label: 'Work',
-    items: [
-      { to: '/tasks', label: 'Tasks', icon: '✅', badgeKey: 'overdueTasks' },
-      { to: '/review', label: 'Review queue', icon: '🕵️', badgeKey: 'reviewAll', badgeTone: 'warning' },
     ],
   },
   {

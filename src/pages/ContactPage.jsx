@@ -51,23 +51,16 @@ export const V2_SCHEMA = {
     idPrefix: 'person',
     nameField: 'name',
     orgField: 'company',
-    orgLabel: 'Firm Name',
+    orgLabel: 'Company',
     coreFields: [
       { key: 'name', label: 'Full Name', required: true },
-      { key: 'company', label: 'Firm Name', required: true },
-      { key: 'role', label: 'Role' },
+      { key: 'company', label: 'Company', required: true },
+      { key: 'role', label: 'Role/Title' },
       { key: 'email', label: 'Email', type: 'email' },
       { key: 'phone', label: 'Phone', type: 'tel' },
       { key: 'location', label: 'Location (City, State)' },
     ],
-    firmFields: [
-      { key: 'industry', label: 'Industry' },
-      { key: 'firmSize', label: 'Firm Size' },
-      { key: 'clientCount', label: 'Client Count' },
-      { key: 'avgClientRevenue', label: 'Avg Client Revenue' },
-      { key: 'yearsInPractice', label: 'Years in Practice' },
-      { key: 'leadScore', label: 'Lead Score (1-10)' },
-    ],
+    firmFields: [],
     richFields: ['softwareStack', 'painPoints', 'wtpSignals', 'quotableLines', 'known_pains'],
     statusOptions: ['new', 'contacted', 'interested', 'declined'],
     lifecycleStages: LIFECYCLE_STAGES,
@@ -78,12 +71,10 @@ export const V2_SCHEMA = {
     icon: '🏢',
     idPrefix: 'company',
     nameField: 'name',
-    orgField: 'company',
-    orgLabel: 'Company',
+    orgField: 'name',
+    orgLabel: 'Company Name',
     coreFields: [
-      { key: 'name', label: 'Owner Name', required: true },
-      { key: 'company', label: 'Company', required: true },
-      { key: 'role', label: 'Role' },
+      { key: 'name', label: 'Company Name', required: true },
       { key: 'email', label: 'Email', type: 'email' },
       { key: 'phone', label: 'Phone', type: 'tel' },
       { key: 'location', label: 'Location (City, State)' },
@@ -103,11 +94,29 @@ export const V2_SCHEMA = {
       { key: 'leadScore', label: 'Lead Score (1-10)' },
       { key: 'parent_company_id', label: 'Parent Company ID' },
     ],
-    richFields: ['painPoints', 'wtpSignals', 'quotableLines', 'known_pricing_signals'],
+    richFields: ['painPoints', 'wtpSignals', 'quotableLines', 'known_pricing_signals', 'softwareStack', 'serviceLines'],
     statusOptions: ['new', 'contacted', 'interested', 'hired', 'declined'],
     lifecycleStages: LIFECYCLE_STAGES,
   },
 };
+
+// Workspace-aware labels. The "company" kind doubles as "firm" in the deal-flow
+// workspace, so the UI needs to rename its singular/plural labels at render
+// time rather than forking the schema.
+export function schemaFor(kind, workspace = 'crm') {
+  const base = V2_SCHEMA[kind];
+  if (kind === 'company' && workspace === 'deal_flow') {
+    return {
+      ...base,
+      label: 'Firms',
+      singular: 'Firm',
+      orgLabel: 'Firm Name',
+      coreFields: base.coreFields.map((f) => f.key === 'name' ? { ...f, label: 'Firm Name' } : f),
+      firmFields: base.firmFields.filter((f) => f.key !== 'industry'),
+    };
+  }
+  return base;
+}
 
 function StatusPill({ status }) {
   const s = status || 'new';
@@ -373,7 +382,8 @@ function RelatedPanel({ row, kind, allPeople, allCompanies }) {
 }
 
 function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], allCompanies = [] }) {
-  const cfg = V2_SCHEMA[kind];
+  const workspace = row?.workspace || (kind === 'company' ? 'crm' : 'deal_flow');
+  const cfg = schemaFor(kind, workspace);
   const navigate = useNavigate();
   const [convertOpen, setConvertOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -386,6 +396,7 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
   const wtp = parse(row.wtpSignals);
   const quotes = parse(row.quotableLines);
   const softwareStack = parse(row.softwareStack);
+  const serviceLines = parse(row.serviceLines);
 
   const norm = (s) => (s || '').trim().toLowerCase();
   const companyContacts = useMemo(() => {
@@ -484,39 +495,57 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
-          {kind === 'company' ? (
-            <>
-              <Tile label="Industry" value={row.industry} history={row.enrichmentHistory} fieldName="industry" />
-              <Tile label="Revenue" value={row.revenue} history={row.enrichmentHistory} fieldName="revenue" />
-              <Tile label="Employees" value={row.employees} history={row.enrichmentHistory} fieldName="employees" />
+        {kind === 'person' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 24 }}>
+            <Tile label="Email" value={row.email} history={row.enrichmentHistory} fieldName="email" />
+            <Tile label="Phone" value={row.phone} history={row.enrichmentHistory} fieldName="phone" />
+            <Tile label="Title / Role" value={row.role} history={row.enrichmentHistory} fieldName="role" />
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: workspace === 'deal_flow' ? 24 : 14 }}>
+              {workspace !== 'deal_flow' && (
+                <Tile label="Industry" value={row.industry} history={row.enrichmentHistory} fieldName="industry" />
+              )}
+              <Tile label="Revenue" value={row.revenue_band || row.revenue} history={row.enrichmentHistory} fieldName="revenue" />
+              <Tile label="Employees" value={row.employee_count || row.employees} history={row.enrichmentHistory} fieldName="employees" />
               <Tile label="Years" value={row.yearsInBusiness} history={row.enrichmentHistory} fieldName="yearsInBusiness" />
               <Tile label="Lead Score" value={row.leadScore ? `${row.leadScore}/10` : null} />
-            </>
-          ) : (
-            <>
-              <Tile label="Firm Size" value={row.firmSize} history={row.enrichmentHistory} fieldName="firmSize" />
-              <Tile label="Clients" value={row.clientCount} history={row.enrichmentHistory} fieldName="clientCount" />
-              <Tile label="Avg Client Rev" value={row.avgClientRevenue} history={row.enrichmentHistory} fieldName="avgClientRevenue" />
-              <Tile label="Years" value={row.yearsInPractice} history={row.enrichmentHistory} fieldName="yearsInPractice" />
-              <Tile label="Lead Score" value={row.leadScore ? `${row.leadScore}/10` : null} />
-            </>
-          )}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24, fontSize: 13 }}>
-          {row.email && <div><strong>Email:</strong> {row.email}</div>}
-          {row.phone && <div><strong>Phone:</strong> {row.phone}</div>}
-          {row.interviewDate && <div><strong>Interviewed:</strong> {row.interviewDate}</div>}
-          {kind === 'company' && row.currentAccounting && <div><strong>Accounting:</strong> {row.currentAccounting}</div>}
-          {kind === 'company' && row.monthsBehind && <div><strong>Months Behind:</strong> {row.monthsBehind}</div>}
-          {kind === 'company' && row.currentSpend && <div><strong>Current Spend:</strong> {row.currentSpend}</div>}
-        </div>
+            </div>
+            {workspace !== 'deal_flow' && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 24 }}>
+                <Tile label="Accounting" value={row.currentAccounting} history={row.enrichmentHistory} fieldName="currentAccounting" />
+                <Tile label="Months Behind" value={row.monthsBehind} history={row.enrichmentHistory} fieldName="monthsBehind" />
+                <Tile label="Current Spend" value={row.currentSpend} history={row.enrichmentHistory} fieldName="currentSpend" />
+                <div style={{ padding: 14, backgroundColor: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
+                  <div style={{ fontSize: 10, color: COLORS.textDim, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>🛠 Software Stack</div>
+                  {Array.isArray(softwareStack) && softwareStack.length > 0
+                    ? <ChipList items={softwareStack} color={COLORS.blue} />
+                    : <div style={{ fontSize: 13, color: COLORS.textDim }}>—</div>}
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
         {Array.isArray(pains) && pains.length > 0 && (
           <Section title="😤 Pain Points"><ChipList items={pains} color={COLORS.danger} /></Section>
         )}
-        {Array.isArray(softwareStack) && softwareStack.length > 0 && (
+        {kind === 'company' && workspace === 'deal_flow' && (
+          <Section title="🗂 Service Lines">
+            {Array.isArray(serviceLines) && serviceLines.length > 0
+              ? <ChipList items={serviceLines} color={COLORS.accent} />
+              : <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>None extracted yet — will populate on next enrichment.</div>}
+          </Section>
+        )}
+        {kind === 'company' && workspace === 'deal_flow' && (
+          <Section title="🛠 Software Stack">
+            {Array.isArray(softwareStack) && softwareStack.length > 0
+              ? <ChipList items={softwareStack} color={COLORS.blue} />
+              : <div style={{ fontSize: 13, color: COLORS.textDim, fontStyle: 'italic' }}>None extracted yet — will populate on next enrichment.</div>}
+          </Section>
+        )}
+        {kind === 'person' && Array.isArray(softwareStack) && softwareStack.length > 0 && (
           <Section title="🛠 Software Stack"><ChipList items={softwareStack} color={COLORS.blue} /></Section>
         )}
         {wtp && typeof wtp === 'object' && (
@@ -593,7 +622,7 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
 }
 
 export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading, workspace = 'crm' }) {
-  const cfg = V2_SCHEMA[kind];
+  const cfg = schemaFor(kind, workspace);
   const navigate = useNavigate();
   const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -615,8 +644,35 @@ export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onD
 
   const { data: tags } = useCollection('tags');
   const { data: savedViews } = useCollection('views');
+  const { data: allCompanies } = useCollection('companies');
+  const { data: allTasks } = useCollection('tasks');
   const toast = useToast();
   const kindObjectType = kind;
+
+  // Build fast lookups so the list view can resolve each row's associated
+  // company (for person.company→industry/revenue) and each row's open-task
+  // count without O(n*m) scans on every render.
+  const companyByName = useMemo(() => {
+    const map = new Map();
+    (allCompanies || []).forEach((c) => {
+      if (c.deletedAt) return;
+      const ws = c.workspace || 'crm';
+      if (ws !== workspace && kind === 'person') return;
+      if (c.name) map.set(c.name.trim().toLowerCase(), c);
+    });
+    return map;
+  }, [allCompanies, workspace, kind]);
+
+  const openTasksByEntity = useMemo(() => {
+    const map = new Map();
+    (allTasks || []).forEach((t) => {
+      if (t.status !== 'Open' && t.status !== 'In-Progress') return;
+      const entityId = kind === 'person' ? t.related_person_id : t.related_company_id;
+      if (!entityId) return;
+      map.set(entityId, (map.get(entityId) || 0) + 1);
+    });
+    return map;
+  }, [allTasks, kind]);
 
   useEffect(() => {
     if (!viewParam || !savedViews || savedViews.length === 0) return;
@@ -715,30 +771,95 @@ export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onD
     doSave();
   };
 
-  const columns = [
-    { key: 'name', header: 'Name', width: '1.4fr', render: (r) => (
+  const resolveCompany = (r) => {
+    if (!r?.company) return null;
+    return companyByName.get(r.company.trim().toLowerCase()) || null;
+  };
+
+  const openTasksCell = (r) => {
+    const count = openTasksByEntity.get(r.id) || 0;
+    if (count === 0) return <span style={{ color: COLORS.textDim }}>—</span>;
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); navigate(`${basePath}/${r.id}#tasks`); }}
+        style={{ background: 'none', border: 'none', padding: 0, color: COLORS.primary, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}
+        aria-label={`${count} open task${count === 1 ? '' : 's'}`}
+      >
+        {count}
+      </button>
+    );
+  };
+
+  const nameCol = {
+    key: 'name',
+    header: kind === 'company' ? (workspace === 'deal_flow' ? 'Firm Name' : 'Company Name') : 'Name',
+    width: '1.4fr',
+    render: (r) => (
       <span style={{ fontWeight: 600, color: COLORS.text }}>
         {r.name || <span style={{ color: COLORS.textDim, fontStyle: 'italic', fontWeight: 400 }}>(no name)</span>}
       </span>
-    )},
-    { key: cfg.orgField, header: cfg.orgLabel, width: '1.4fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r[cfg.orgField] || '—'}</span> },
-    { key: 'industry', header: 'Industry', width: '1fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.industry || '—'}</span> },
-    { key: 'revenue', header: kind === 'person' ? 'Firm size' : 'Revenue', width: '0.9fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{kind === 'person' ? (r.firmSize || '—') : (r.revenue_band || r.revenue || '—')}</span> },
-    { key: 'lifecycle_stage', header: 'Stage', width: '0.9fr', render: (r) => r.lifecycle_stage ? <LifecycleStagePill stage={r.lifecycle_stage} /> : <StatusPill status={r.status} /> },
-    ...(kind === 'company' && workspace === 'deal_flow' ? [
-      { key: 'roles', header: 'Roles', width: '1.1fr', render: (r) => <RoleChips roles={r.roles} /> },
-    ] : []),
-    { key: 'tags', header: 'Tags', width: '1fr', render: (r) => <TagChips ids={r.tag_ids} tags={tags} /> },
-    { key: 'actions', header: '', width: '0.6fr', align: 'right', render: (r) => (
-      <span onClick={(e) => e.stopPropagation()}>
-        <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
-        <button onClick={async () => {
-          const ok = await confirm({ title: `Delete ${r.name}?`, confirmLabel: 'Delete', destructive: true });
-          if (ok) onDelete(r.id);
-        }} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
-      </span>
-    )},
-  ];
+    ),
+  };
+
+  const stageCol = { key: 'lifecycle_stage', header: 'Stage', width: '0.9fr', render: (r) => r.lifecycle_stage ? <LifecycleStagePill stage={r.lifecycle_stage} /> : <StatusPill status={r.status} /> };
+  const tagsCol = { key: 'tags', header: 'Tags', width: '1fr', render: (r) => <TagChips ids={r.tag_ids} tags={tags} /> };
+  const tasksCol = { key: 'open_tasks', header: 'Open Tasks', width: '0.7fr', render: openTasksCell };
+  const actionsCol = { key: 'actions', header: '', width: '0.6fr', align: 'right', render: (r) => (
+    <span onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => openEdit(r)} style={iconBtn} aria-label={`Edit ${r.name || ''}`}>✎</button>
+      <button onClick={async () => {
+        const ok = await confirm({ title: `Delete ${r.name}?`, confirmLabel: 'Delete', destructive: true });
+        if (ok) onDelete(r.id);
+      }} style={{ ...iconBtn, color: COLORS.danger }} aria-label={`Delete ${r.name || ''}`}>🗑</button>
+    </span>
+  )};
+
+  let columns;
+  if (kind === 'person') {
+    columns = [
+      nameCol,
+      { key: 'company', header: 'Company', width: '1.3fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.company || '—'}</span> },
+      { key: 'role', header: 'Role/Title', width: '1fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.role || '—'}</span> },
+      { key: 'revenue', header: 'Revenue', width: '0.9fr', render: (r) => {
+        const c = resolveCompany(r);
+        return <span style={{ color: COLORS.textMuted }}>{(c && (c.revenue_band || c.revenue)) || '—'}</span>;
+      }},
+      { key: 'industry', header: 'Industry', width: '1fr', render: (r) => {
+        const c = resolveCompany(r);
+        return <span style={{ color: COLORS.textMuted }}>{(c && c.industry) || r.industry || '—'}</span>;
+      }},
+      stageCol,
+      tagsCol,
+      tasksCol,
+      actionsCol,
+    ];
+  } else if (kind === 'company' && workspace === 'deal_flow') {
+    columns = [
+      nameCol,
+      { key: 'serviceLines', header: 'Service Lines', width: '1.6fr', render: (r) => {
+        const raw = r.serviceLines;
+        const list = Array.isArray(raw) ? raw : (typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : null);
+        if (!Array.isArray(list) || list.length === 0) return <span style={{ color: COLORS.textDim }}>—</span>;
+        return <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{list.slice(0, 3).join(', ')}{list.length > 3 ? ` +${list.length - 3}` : ''}</span>;
+      }},
+      { key: 'revenue', header: 'Revenue', width: '0.9fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.revenue_band || r.revenue || '—'}</span> },
+      stageCol,
+      tagsCol,
+      tasksCol,
+      actionsCol,
+    ];
+  } else {
+    columns = [
+      nameCol,
+      { key: 'employee_count', header: 'Employees', width: '0.8fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.employee_count || r.employees || '—'}</span> },
+      { key: 'industry', header: 'Industry', width: '1.2fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.industry || '—'}</span> },
+      { key: 'revenue', header: 'Revenue', width: '0.9fr', render: (r) => <span style={{ color: COLORS.textMuted }}>{r.revenue_band || r.revenue || '—'}</span> },
+      stageCol,
+      tagsCol,
+      tasksCol,
+      actionsCol,
+    ];
+  }
 
   return (
     <div style={{ padding: 20 }}>

@@ -332,7 +332,7 @@ function MainApp({ user, onSignOut }) {
       <Route path="/interviews/:id" element={
         <InterviewDetailRoute interviews={interviews} people={people} companies={companies} scripts={scripts} onUpdate={handleUpdateInterview} onLink={handleLinkInterview} onCreatePerson={handleUpsertPerson} onCreateCompany={handleUpsertCompany} onEnrich={handleEnrichContact} />
       } />
-      <Route path="/insights" element={<ThemesPage businesses={companies} practitioners={people} />} />
+      <Route path="/insights" element={<ThemesPage businesses={companiesCrm} practitioners={firms} />} />
       <Route path="/scripts" element={<ScriptsWrapper ScriptPage={ScriptPage} contacts={combinedContacts} />} />
       <Route path="/tasks" element={<Tasks />} />
       {/* Legacy workspace-scoped research paths → canonical. */}

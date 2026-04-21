@@ -71,6 +71,8 @@ const SettingsPageNew = lazy(() => import('./pages/Settings'));
 const ScriptsWrapper = lazy(() => import('./pages/Scripts'));
 const DedupReviewQueue = lazy(() => import('./pages/DedupReviewQueue'));
 import PageSkeleton from './components/ui/PageSkeleton';
+import { LegacyRecordRedirect, LegacyPrefixRedirect } from './router/redirects';
+import PageErrorBoundary from './components/ui/PageErrorBoundary';
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz89C4C15E1Cxmux8bWUWw04pghxiGlqkfb2Ulr_8FMZdnIZ9vcNEakdrGo3zNLhAZV/exec';
 
@@ -113,65 +115,6 @@ const useAPI = () => {
 
   return { call, loading, error, setError };
 };
-
-// ==================== SETTINGS PAGE (LEGACY — kept for Apps Script URL; superseded by pages/Settings) ====================
-function SettingsPage({ sheetsUrl, setSheetsUrl, apiKey, setApiKey }) {
-  const [testLoading, setTestLoading] = useState(false);
-  const [testStatus, setTestStatus] = useState(null);
-
-  const handleTest = async () => {
-    setTestLoading(true);
-    setTestStatus(null);
-    try {
-      const response = await fetch(`${sheetsUrl}?action=getSettings`);
-      if (response.ok) {
-        setTestStatus({ success: true, msg: 'Connected to Apps Script!' });
-      } else {
-        setTestStatus({ success: false, msg: `HTTP ${response.status}. Check the URL.` });
-      }
-    } catch (err) {
-      setTestStatus({ success: false, msg: `Connection failed: ${err.message}` });
-    } finally {
-      setTestLoading(false);
-    }
-  };
-
-  return (
-    <div style={{ padding: '20px', maxWidth: '600px' }}>
-      <h2 style={{ color: COLORS.text, marginBottom: '20px' }}>Settings</h2>
-      <div style={{ marginBottom: '20px' }}>
-        <label style={{ display: 'block', color: COLORS.textDim, fontSize: '14px', marginBottom: '8px' }}>
-          Apps Script Web App URL
-        </label>
-        <input type="text" value={sheetsUrl} onChange={(e) => setSheetsUrl(e.target.value)}
-          placeholder="https://script.google.com/macros/s/..."
-          style={{ width: '100%', padding: '10px', backgroundColor: COLORS.card, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: '4px', boxSizing: 'border-box', marginBottom: '10px' }} />
-        <p style={{ color: COLORS.textDim, fontSize: '12px', margin: '0' }}>
-          Get this from Extensions → Apps Script → Deploy → Manage deployments
-        </p>
-      </div>
-      <button onClick={handleTest} disabled={testLoading || !sheetsUrl}
-        style={{ padding: '10px 16px', backgroundColor: testLoading ? COLORS.border : COLORS.accent, color: '#fff', border: 'none', borderRadius: '4px', cursor: testLoading ? 'not-allowed' : 'pointer', marginBottom: '10px' }}>
-        {testLoading ? 'Testing...' : 'Test Connection'}
-      </button>
-      {testStatus && (
-        <div style={{ padding: '10px', backgroundColor: testStatus.success ? '#1b5e20' : '#b71c1c', color: '#fff', borderRadius: '4px', marginBottom: '20px', fontSize: '14px' }}>
-          {testStatus.msg}
-        </div>
-      )}
-      <div style={{ backgroundColor: COLORS.card, padding: '15px', borderRadius: '4px', color: COLORS.textDim, fontSize: '13px', lineHeight: '1.6' }}>
-        <strong style={{ color: COLORS.text }}>Setup Instructions:</strong>
-        <ol style={{ marginTop: '10px', paddingLeft: '20px' }}>
-          <li>Open your Google Sheet → Extensions → Apps Script</li>
-          <li>Replace all code with the provided Code.gs</li>
-          <li>Deploy → Manage deployments → Edit → New version → Save</li>
-          <li>Copy the web app URL and paste it above</li>
-          <li>Set <code>anthropicApiKey</code> in the Settings sheet tab</li>
-        </ol>
-      </div>
-    </div>
-  );
-}
 
 const inputStyle = {
   width: '100%',
@@ -2431,6 +2374,7 @@ function MainApp({ user, onSignOut }) {
 
   const routes = (
     <Suspense fallback={<PageSkeleton />}>
+    <PageErrorBoundary>
     <Routes>
       {/* ───── Root + legacy redirects ───── */}
       <Route path="/" element={<Navigate to="/crm" replace />} />
@@ -2536,6 +2480,7 @@ function MainApp({ user, onSignOut }) {
       <Route path="/settings" element={<SettingsPageNew user={user} onSignOut={onSignOut} />} />
       <Route path="*" element={<Navigate to="/crm" replace />} />
     </Routes>
+    </PageErrorBoundary>
     </Suspense>
   );
 
@@ -2576,19 +2521,6 @@ function MainApp({ user, onSignOut }) {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} people={people} companies={companies} interviews={interviews} />
     </div>
   );
-}
-
-function LegacyRecordRedirect({ rows, fallback, crmPath, dealFlowPath }) {
-  const { id } = useParams();
-  const row = rows.find((r) => r.id === id);
-  const ws = row?.workspace || fallback;
-  const base = ws === 'deal_flow' ? dealFlowPath : crmPath;
-  return <Navigate to={`${base}/${id}`} replace />;
-}
-
-function LegacyPrefixRedirect({ prefix }) {
-  const { id } = useParams();
-  return <Navigate to={`${prefix}/${id}`} replace />;
 }
 
 export default App;

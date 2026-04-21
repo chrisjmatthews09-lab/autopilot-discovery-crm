@@ -3,13 +3,17 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 
+// Firebase web client config is safe to ship in the browser bundle — this is
+// the Google-documented pattern. Security is enforced by Firestore rules and
+// Auth domain allowlisting, not by hiding these values. Inlining them means
+// CI doesn't need six more secrets just to produce a working build.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: 'AIzaSyAk-1G-tnIHfZdJcMQpLxrbBhWNoj1faxQ',
+  authDomain: 'autopilot-crm-147f0.firebaseapp.com',
+  projectId: 'autopilot-crm-147f0',
+  storageBucket: 'autopilot-crm-147f0.firebasestorage.app',
+  messagingSenderId: '1058017029354',
+  appId: '1:1058017029354:web:70caa64fab93cce2b83b93',
 };
 
 export const app = initializeApp(firebaseConfig);

@@ -1,11 +1,13 @@
 import React from 'react';
 import { COLORS } from '../../config/design-tokens';
 import { buildCSV, downloadCSV } from '../../data/csv';
+import { useToast } from './Toast';
 
 export default function ExportCSVButton({ rows, columns, filename, label = 'Export CSV' }) {
+  const toast = useToast();
   const handle = () => {
     if (!rows || rows.length === 0) {
-      alert('Nothing to export — no visible rows.');
+      toast.info('Nothing to export — no visible rows.');
       return;
     }
     // Columns may be DataTable columns (key, header, render). Convert to export columns.

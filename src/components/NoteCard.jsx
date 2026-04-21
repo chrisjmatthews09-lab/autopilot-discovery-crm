@@ -4,6 +4,8 @@
 import React, { useState } from 'react';
 import { COLORS } from '../config/design-tokens';
 import { updateDoc, deleteDoc } from '../data/firestore';
+import { useConfirm } from './ui/ConfirmDialog';
+import { useToast } from './ui/Toast';
 
 function shortDate(value) {
   if (!value) return '—';
@@ -20,6 +22,8 @@ function fullTimestamp(value) {
 }
 
 export default function NoteCard({ interaction, authorLabel = 'Chris', contactLabel }) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(interaction.title || '');
   const [body, setBody] = useState(interaction.body || '');
@@ -37,16 +41,17 @@ export default function NoteCard({ interaction, authorLabel = 'Chris', contactLa
       setEditing(false);
     } catch (err) {
       console.error(err);
-      alert('Failed to save note — check console.');
+      toast.error('Failed to save note — check console.');
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async () => {
-    if (!window.confirm('Delete this note?')) return;
+    const ok = await confirm({ title: 'Delete this note?', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     try { await deleteDoc('interactions', interaction.id); }
-    catch (err) { console.error(err); alert('Failed to delete.'); }
+    catch (err) { console.error(err); toast.error('Failed to delete.'); }
   };
 
   return (

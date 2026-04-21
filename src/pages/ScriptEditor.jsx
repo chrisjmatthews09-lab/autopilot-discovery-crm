@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { COLORS } from '../config/design-tokens';
 import { updateDoc } from '../data/firestore';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 const COLOR_KEYS = ['primary', 'accent', 'blue', 'purple', 'gold'];
 const resolveColor = (k) => COLORS[k] || k || COLORS.primary;
 const newId = (p) => `${p}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 export default function ScriptEditor({ script }) {
+  const confirm = useConfirm();
   const [draft, setDraft] = useState(script);
   const [saveStatus, setSaveStatus] = useState('idle');
   const [dirty, setDirty] = useState(false);
@@ -21,7 +23,10 @@ export default function ScriptEditor({ script }) {
   });
 
   const addSection = () => update({ sections: [...draft.sections, { id: newId('s'), name: 'New Section', color: 'primary', questions: [] }] });
-  const removeSection = (sid) => { if (window.confirm('Delete this section and all its questions?')) update({ sections: draft.sections.filter((s) => s.id !== sid) }); };
+  const removeSection = async (sid) => {
+    const ok = await confirm({ title: 'Delete this section and all its questions?', confirmLabel: 'Delete', destructive: true });
+    if (ok) update({ sections: draft.sections.filter((s) => s.id !== sid) });
+  };
   const moveSection = (sid, dir) => {
     const i = draft.sections.findIndex((s) => s.id === sid);
     const j = i + dir;
@@ -85,7 +90,10 @@ export default function ScriptEditor({ script }) {
     }
   };
 
-  const handleReset = () => { if (window.confirm('Discard unsaved changes?')) { setDraft(script); setDirty(false); } };
+  const handleReset = async () => {
+    const ok = await confirm({ title: 'Discard unsaved changes?', confirmLabel: 'Discard', destructive: true });
+    if (ok) { setDraft(script); setDirty(false); }
+  };
 
   return (
     <div style={{ padding: 20, maxWidth: 900 }}>

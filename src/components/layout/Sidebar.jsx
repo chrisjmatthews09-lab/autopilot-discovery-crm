@@ -7,6 +7,7 @@ import { deleteView, parseFilters, encodeFiltersToSearch, VIEW_OBJECT_ICONS, vie
 import { useWorkspace } from '../../hooks/useWorkspace';
 import { useHasHover } from '../../hooks/useHasHover';
 import { WORKSPACES } from '../../config/workspaces';
+import { useConfirm } from '../ui/ConfirmDialog';
 
 // Research, Tasks, and Review queue are platform-level — identical in both
 // workspaces. They read from / write to the same global collections, so we
@@ -236,6 +237,7 @@ function WorkspaceToggle({ currentId, onSwitch }) {
 
 function PinnedViewLink({ view }) {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const route = viewRoute(view);
   const hasHover = useHasHover();
   const icon = VIEW_OBJECT_ICONS[view.object_type] || '⭐';
@@ -250,7 +252,8 @@ function PinnedViewLink({ view }) {
 
   const remove = async (e) => {
     e.stopPropagation();
-    if (!window.confirm(`Remove pinned view "${view.name}"?`)) return;
+    const ok = await confirm({ title: `Remove pinned view "${view.name}"?`, confirmLabel: 'Remove', destructive: true });
+    if (!ok) return;
     await deleteView(view.id);
   };
 

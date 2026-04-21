@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { COLORS } from '../config/design-tokens';
 import { createDoc, updateDoc } from '../data/firestore';
 import { getInterviewDate } from '../lib/interviewFields.js';
+import { useToast } from './ui/Toast';
 
 function toMs(v) {
   if (!v) return 0;
@@ -45,6 +46,7 @@ function interviewBelongsToPerson(interview, personId) {
  */
 export default function CompanyContactsSection({ company, contacts, interviews, interactions, workspaceId, onNavigate }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
@@ -86,7 +88,7 @@ export default function CompanyContactsSection({ company, contacts, interviews, 
       await updateDoc('companies', company.id, { primaryContactId: personId });
     } catch (err) {
       console.error(err);
-      alert('Failed to set primary — check console.');
+      toast.error('Failed to set primary — check console.');
     } finally {
       setBusyId(null);
     }
@@ -186,6 +188,7 @@ export default function CompanyContactsSection({ company, contacts, interviews, 
 }
 
 function AddContactForm({ company, workspaceId, onDone }) {
+  const toast = useToast();
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [email, setEmail] = useState('');
@@ -193,7 +196,7 @@ function AddContactForm({ company, workspaceId, onDone }) {
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (!name.trim()) { alert('Name is required.'); return; }
+    if (!name.trim()) { toast.error('Name is required.'); return; }
     setSaving(true);
     try {
       const newId = `person-${Date.now()}`;
@@ -210,7 +213,7 @@ function AddContactForm({ company, workspaceId, onDone }) {
       onDone();
     } catch (err) {
       console.error(err);
-      alert('Failed to create contact — check console.');
+      toast.error('Failed to create contact — check console.');
       setSaving(false);
     }
   };

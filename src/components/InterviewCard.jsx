@@ -9,6 +9,7 @@ import TranscriptModal from './TranscriptModal.jsx';
 import ContactPickerModal from './ContactPickerModal.jsx';
 import { useCollection } from '../hooks/useCollection';
 import { moveInterview } from '../data/merges';
+import { useToast } from './ui/Toast';
 import {
   getInterviewDate,
   getInterviewSummary,
@@ -38,6 +39,7 @@ function previewText(text, maxChars = 180) {
 }
 
 export default function InterviewCard({ interview, ordinal, contactLabel }) {
+  const toast = useToast();
   const [modalMode, setModalMode] = useState(null); // 'transcript' | 'summary' | null
   const [menuOpen, setMenuOpen] = useState(false);
   const [movePickerKind, setMovePickerKind] = useState(null); // 'person' | 'company' | null
@@ -99,6 +101,7 @@ export default function InterviewCard({ interview, ordinal, contactLabel }) {
           <button
             onClick={() => setMenuOpen((v) => !v)}
             title="More actions"
+            aria-label="More actions"
             style={{ padding: '2px 8px', background: 'transparent', border: `1px solid ${COLORS.border}`, borderRadius: 4, cursor: 'pointer', fontSize: 14, color: COLORS.textMuted, lineHeight: 1 }}
           >⋯</button>
           {menuOpen && (
@@ -176,7 +179,7 @@ export default function InterviewCard({ interview, ordinal, contactLabel }) {
               setMovePickerKind(null);
             } catch (err) {
               console.error(err);
-              alert(`Move failed: ${err.message}`);
+              toast.error(`Move failed: ${err.message}`);
             } finally {
               setMoveBusy(false);
             }

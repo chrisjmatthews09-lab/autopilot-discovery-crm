@@ -5,8 +5,12 @@ import { TASK_PRIORITIES, TASK_PRIORITY_COLORS } from '../../config/enums';
 import { useCollection } from '../../hooks/useCollection';
 import { createTask, updateTask, deleteTask, RELATED_KEYS, isOverdue } from '../../data/tasks';
 import { useWorkspace } from '../../hooks/useWorkspace';
+import { useConfirm } from './ConfirmDialog';
+import { useToast } from './Toast';
 
 export default function TasksCard({ entityType, entityId, recordLabel = 'record' }) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const { data: tasks, loading } = useCollection('tasks');
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -48,7 +52,7 @@ export default function TasksCard({ entityType, entityId, recordLabel = 'record'
       setPriority('P2');
     } catch (err) {
       console.error('Failed to add task', err);
-      alert('Could not add task — check console.');
+      toast.error('Could not add task — check console.');
     } finally {
       setAdding(false);
     }
@@ -81,8 +85,11 @@ export default function TasksCard({ entityType, entityId, recordLabel = 'record'
                 <span style={{ flex: 1, fontSize: 13, color: COLORS.text, textDecoration: t.status === 'Done' ? 'line-through' : 'none', opacity: t.status === 'Done' ? 0.6 : 1 }}>{t.title || '(untitled)'}</span>
                 {t.due_date && <span style={{ fontSize: 11, color: overdue ? COLORS.danger : COLORS.textMuted, fontWeight: overdue ? 600 : 400 }}>{t.due_date}</span>}
                 <span style={{ padding: '1px 6px', borderRadius: 3, background: prio.bg, color: prio.fg, fontSize: 10, fontWeight: 700 }}>{t.priority}</span>
-                <button onClick={() => { if (window.confirm('Delete task?')) deleteTask(t.id); }}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 12 }} title="Delete">✕</button>
+                <button onClick={async () => {
+                    const ok = await confirm({ title: 'Delete task?', confirmLabel: 'Delete', destructive: true });
+                    if (ok) deleteTask(t.id);
+                  }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 12 }} title="Delete" aria-label="Delete task">✕</button>
               </div>
             );
           })}

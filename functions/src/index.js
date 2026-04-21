@@ -38,12 +38,48 @@ const OPTIONAL_STRING_FIELDS = [
 ];
 
 const MAX_PAYLOAD_BYTES = 900_000; // soft cap below Firestore's 1MB doc limit
+const DEAD_LETTER_PAYLOAD_SNIPPET_BYTES = 8_000;
 
 function sanitizeDocId(raw) {
   // Firestore doc IDs cannot contain / . # $ [ ] and are capped at 1500 bytes.
   // We also disallow leading/trailing dots and double-dots.
   const cleaned = String(raw).trim().replace(/[/.#$\[\]]/g, '-');
   return cleaned.slice(0, 256);
+}
+
+// Write a dead-letter record so a failed ingestion is visible in the Settings
+// → Stuck Ingestions UI instead of silently vanishing. Fire-and-forget: a
+// failure to record the dead-letter must not mask the underlying error, so
+// errors here are logged and swallowed.
+async function recordDeadLetter({ uid, reason, detail = {}, body }) {
+  try {
+    const targetUid = uid || OWNER_UID.value();
+    const candidateId = sanitizeDocId(
+      (body && body.sourceIngestionJobId) || `dl-${Date.now()}`,
+    );
+    const docId = candidateId || `dl-${Date.now()}`;
+    const ref = db.collection('users').doc(targetUid).collection('ingestionDeadLetter').doc(docId);
+    let payloadSnippet = null;
+    if (body !== undefined) {
+      try {
+        const serialized = typeof body === 'string' ? body : JSON.stringify(body);
+        payloadSnippet = serialized.slice(0, DEAD_LETTER_PAYLOAD_SNIPPET_BYTES);
+      } catch {
+        payloadSnippet = null;
+      }
+    }
+    await ref.set({
+      reason,
+      detail,
+      payloadSnippet,
+      sourceIngestionJobId: (body && body.sourceIngestionJobId) || null,
+      title: (body && body.title) || null,
+      recordedAt: (body && body.recordedAt) || null,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('[ingestInterview] failed to record dead-letter', { reason, err: err?.message });
+  }
 }
 
 export const ingestInterview = onRequest(
@@ -65,28 +101,37 @@ export const ingestInterview = onRequest(
 
     const body = req.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      await recordDeadLetter({ reason: 'invalid_body', body });
       return res.status(400).json({ error: 'invalid_body' });
     }
 
     for (const field of REQUIRED_STRING_FIELDS) {
       const value = body[field];
       if (typeof value !== 'string' || !value.trim()) {
+        await recordDeadLetter({ reason: 'missing_or_invalid_field', detail: { field }, body });
         return res.status(400).json({ error: 'missing_or_invalid_field', field });
       }
     }
     for (const field of OPTIONAL_STRING_FIELDS) {
       if (field in body && body[field] !== null && body[field] !== '' && typeof body[field] !== 'string') {
+        await recordDeadLetter({ reason: 'invalid_field_type', detail: { field }, body });
         return res.status(400).json({ error: 'invalid_field_type', field });
       }
     }
 
     const serialized = JSON.stringify(body);
     if (Buffer.byteLength(serialized, 'utf8') > MAX_PAYLOAD_BYTES) {
+      await recordDeadLetter({
+        reason: 'payload_too_large',
+        detail: { bytes: Buffer.byteLength(serialized, 'utf8'), maxBytes: MAX_PAYLOAD_BYTES },
+        body,
+      });
       return res.status(413).json({ error: 'payload_too_large', maxBytes: MAX_PAYLOAD_BYTES });
     }
 
     const docId = sanitizeDocId(body.sourceIngestionJobId);
     if (!docId) {
+      await recordDeadLetter({ reason: 'invalid_job_id', body });
       return res.status(400).json({ error: 'invalid_job_id' });
     }
 
@@ -119,6 +164,12 @@ export const ingestInterview = onRequest(
       return res.status(201).json({ status: 'created', id: docId });
     } catch (err) {
       console.error('[ingestInterview] write failed', { docId, err: err?.message });
+      await recordDeadLetter({
+        uid,
+        reason: 'write_failed',
+        detail: { message: err?.message || String(err) },
+        body,
+      });
       return res.status(500).json({ error: 'write_failed' });
     }
   },

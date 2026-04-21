@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { COLORS } from '../config/design-tokens';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 export default function ScriptPage({ contacts, scriptType, script }) {
+  const confirm = useConfirm();
   if (!script) return null;
   const resolveColor = (k) => COLORS[k] || k || COLORS.primary;
   const [checkedQs, setCheckedQs] = useState(() => {
@@ -14,8 +16,9 @@ export default function ScriptPage({ contacts, scriptType, script }) {
     localStorage.setItem('autopilot-checklist', JSON.stringify(newChecked));
   };
 
-  const clearProgress = () => {
-    if (window.confirm('Clear all checklist progress?')) {
+  const clearProgress = async () => {
+    const ok = await confirm({ title: 'Clear all checklist progress?', confirmLabel: 'Clear', destructive: true });
+    if (ok) {
       setCheckedQs({});
       localStorage.removeItem('autopilot-checklist');
     }

@@ -6,6 +6,8 @@ import { useCollection } from '../hooks/useCollection';
 import { createTask, updateTask, deleteTask, bulkUpdateTasks, isOverdue } from '../data/tasks';
 import { personPath, companyPath, interviewPath } from '../config/workspaces';
 import { getInterviewHeadline } from '../lib/interviewFields.js';
+import { useConfirm } from '../components/ui/ConfirmDialog';
+import { useToast } from '../components/ui/Toast';
 
 const RELATED_TYPES = [
   { value: 'any', label: 'Any' },
@@ -17,6 +19,8 @@ const RELATED_TYPES = [
 ];
 
 export default function Tasks({ workspace = null }) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const { data: allTasks, loading } = useCollection('tasks');
   const { data: people } = useCollection('people');
   const { data: companies } = useCollection('companies');
@@ -91,7 +95,7 @@ export default function Tasks({ workspace = null }) {
       setNewTitle('');
     } catch (err) {
       console.error('Failed to create task', err);
-      alert('Could not create task — check console.');
+      toast.error('Could not create task — check console.');
     } finally {
       setCreating(false);
     }
@@ -111,7 +115,13 @@ export default function Tasks({ workspace = null }) {
     if (action === 'done') await bulkUpdateTasks(ids, { status: 'Done' });
     else if (action === 'open') await bulkUpdateTasks(ids, { status: 'Open' });
     else if (action === 'delete') {
-      if (!window.confirm(`Delete ${ids.length} task(s)?`)) return;
+      const ok = await confirm({
+        title: `Delete ${ids.length} task${ids.length === 1 ? '' : 's'}?`,
+        description: 'This cannot be undone.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!ok) return;
       for (const id of ids) await deleteTask(id);
     } else if (action === 'due') {
       const d = window.prompt('New due date (YYYY-MM-DD), blank to clear:');
@@ -215,8 +225,17 @@ export default function Tasks({ workspace = null }) {
                 ) : <span style={{ color: COLORS.textDim, fontSize: 12 }}>—</span>}
               </div>
               <div style={{ color: COLORS.textMuted, fontSize: 12 }}>{t.assignee || 'Chris'}</div>
-              <button onClick={() => { if (window.confirm('Delete task?')) deleteTask(t.id); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 14 }} title="Delete">✕</button>
+              <button
+                onClick={async () => {
+                  const ok = await confirm({ title: 'Delete task?', confirmLabel: 'Delete', destructive: true });
+                  if (ok) deleteTask(t.id);
+                }}
+                aria-label="Delete task"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 14 }}
+                title="Delete"
+              >
+                ✕
+              </button>
             </div>
           );
         })}

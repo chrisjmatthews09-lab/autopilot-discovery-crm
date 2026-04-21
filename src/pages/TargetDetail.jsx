@@ -12,10 +12,12 @@ import TasksCard from '../components/ui/TasksCard';
 import { shortDollar } from './TargetsList';
 import { generateDiligenceTasks, DILIGENCE_TASK_COUNT, DILIGENCE_CATEGORIES } from '../data/diligence';
 import { updateTask } from '../data/tasks';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 export default function TargetDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const { data: targets } = useCollection('targets');
   const { data: pipelines } = useCollection('pipelines');
   const { data: companies } = useCollection('companies');
@@ -57,7 +59,8 @@ export default function TargetDetail() {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete target "${company?.name || 'this target'}"? This cannot be undone.`)) return;
+    const ok = await confirm({ title: `Delete target "${company?.name || 'this target'}"?`, description: 'This cannot be undone.', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     await deleteTarget(target.id);
     navigate('/deal-flow/targets');
   };
@@ -296,6 +299,7 @@ function TargetNotes({ target }) {
 }
 
 function DiligenceChecklist({ target }) {
+  const confirm = useConfirm();
   const { data: allTasks } = useCollection('tasks');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
@@ -319,9 +323,11 @@ function DiligenceChecklist({ target }) {
 
   const handleGenerate = async () => {
     if (tasks.length > 0) {
-      if (!window.confirm(`This target already has ${tasks.length} diligence tasks. Add another ${DILIGENCE_TASK_COUNT}?`)) return;
+      const ok = await confirm({ title: `This target already has ${tasks.length} diligence tasks. Add another ${DILIGENCE_TASK_COUNT}?`, confirmLabel: 'Add' });
+      if (!ok) return;
     } else {
-      if (!window.confirm(`Create ${DILIGENCE_TASK_COUNT} diligence tasks for this target?`)) return;
+      const ok = await confirm({ title: `Create ${DILIGENCE_TASK_COUNT} diligence tasks for this target?`, confirmLabel: 'Create' });
+      if (!ok) return;
     }
     setGenerating(true); setError(null);
     try {
@@ -509,7 +515,7 @@ function IntroductionPaths({ target, people }) {
                   <span style={{ fontSize: 10, fontWeight: 700, color: strengthColor(p.strength), textTransform: 'uppercase', letterSpacing: 0.3 }}>
                     {p.strength}
                   </span>
-                  <button onClick={() => removePath(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 12 }}>✕</button>
+                  <button onClick={() => removePath(idx)} aria-label="Remove warm path" style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 12 }}>✕</button>
                 </div>
                 {p.note && <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 4 }}>{p.note}</div>}
               </div>

@@ -19,6 +19,7 @@ import { logInteraction } from '../data/interactions';
 import InterviewCard from './InterviewCard.jsx';
 import CallCard from './CallCard.jsx';
 import NoteCard from './NoteCard.jsx';
+import { useToast } from './ui/Toast';
 import { getInterviewDate } from '../lib/interviewFields.js';
 
 const PAGE_SIZE = 20;
@@ -209,6 +210,7 @@ export default function Timeline({ entityType, entityId, contactIds, peopleById 
 }
 
 function ComposeForm({ kind, entityType, entityId, onDone }) {
+  const toast = useToast();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [duration, setDuration] = useState('');
@@ -229,7 +231,7 @@ function ComposeForm({ kind, entityType, entityId, onDone }) {
       onDone();
     } catch (err) {
       console.error('Failed to log interaction', err);
-      alert('Failed to save — check console.');
+      toast.error('Failed to save — check console.');
       setSaving(false);
     }
   };

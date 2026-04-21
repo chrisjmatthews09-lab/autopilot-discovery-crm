@@ -440,7 +440,10 @@ export async function executePlan(plan, interviewId, jobId, log = () => {}) {
 export async function processInterview(interview) {
   const jobId = interview.sourceIngestionJobId || interview.plaudRecordingId || interview.id;
   const tag = `[ingest ${jobId}]`;
-  const log = (msg) => { try { console.log(`${tag} ${msg}`); } catch { /* ignore */ } };
+  const log = (msg) => {
+    if (!import.meta.env.DEV) return;
+    try { console.log(`${tag} ${msg}`); } catch { /* ignore */ }
+  };
 
   if (!interview || !interview.id) {
     throw new Error('processInterview: interview must have an id');
@@ -680,7 +683,10 @@ export async function resolveReview(reviewItem, choice, options = {}) {
       const fresh = await getDoc('interviews', interviewId);
       if (fresh) {
         await enrichAndMergeInterview(fresh, {
-          log: (msg) => { try { console.log(`[resolveReview ${interviewId}] ${msg}`); } catch { /* ignore */ } },
+          log: (msg) => {
+            if (!import.meta.env.DEV) return;
+            try { console.log(`[resolveReview ${interviewId}] ${msg}`); } catch { /* ignore */ }
+          },
         });
       }
     } catch (err) {

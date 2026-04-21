@@ -3,8 +3,10 @@ import { COLORS, DISPLAY } from '../config/design-tokens';
 import { useCollection } from '../hooks/useCollection';
 import { createDoc, deleteDoc } from '../data/firestore';
 import { analyzeThemes } from '../services/themesService.js';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 export default function ThemesPage({ businesses, practitioners }) {
+  const confirm = useConfirm();
   const [bizThemes, setBizThemes] = useState(null);
   const [pracThemes, setPracThemes] = useState(null);
   const [bizLoading, setBizLoading] = useState(false);
@@ -32,7 +34,8 @@ export default function ThemesPage({ businesses, practitioners }) {
   };
 
   const deleteSynthesis = async (id) => {
-    if (!window.confirm('Delete this synthesis?')) return;
+    const ok = await confirm({ title: 'Delete this synthesis?', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     await deleteDoc('syntheses', id);
   };
 

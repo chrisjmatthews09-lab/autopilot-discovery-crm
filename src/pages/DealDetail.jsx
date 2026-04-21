@@ -11,10 +11,12 @@ import RecordDetailScaffold from '../components/record/RecordDetailScaffold';
 import Timeline from '../components/ui/Timeline';
 import TasksCard from '../components/ui/TasksCard';
 import CloseDealModal from '../components/ui/CloseDealModal';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 export default function DealDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const { data: deals } = useCollection('deals');
   const { data: pipelines } = useCollection('pipelines');
   const { data: companies } = useCollection('companies');
@@ -91,7 +93,8 @@ export default function DealDetail() {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete deal "${deal.name}"? This cannot be undone.`)) return;
+    const ok = await confirm({ title: `Delete deal "${deal.name}"?`, description: 'This cannot be undone.', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     await deleteDeal(deal.id);
     navigate('/crm/deals');
   };
@@ -439,6 +442,7 @@ function DealRightPanel({ deal, company, primaryPerson, people, companies }) {
                   {m.role && <div style={{ fontSize: 10, color: COLORS.textMuted }}>{m.role}</div>}
                 </Link>
                 <button onClick={() => removeMember(m.id)}
+                  aria-label="Remove from buying committee"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textDim, fontSize: 12 }}>✕</button>
               </div>
             ))}

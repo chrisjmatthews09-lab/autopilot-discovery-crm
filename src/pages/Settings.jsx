@@ -8,6 +8,7 @@ import { clearStoredToken, connectBoth, connectCalendar, connectGmail, getGoogle
 import { migrateWorkspaceBackfill, migrateDedupFields } from '../data/migrate';
 import { undoMerge } from '../data/merges';
 import { findDuplicatePersonPairs, findDuplicateCompanyPairs } from '../lib/dedup/duplicateScan';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 export default function Settings({ user, onSignOut }) {
   return (
@@ -29,6 +30,8 @@ export default function Settings({ user, onSignOut }) {
 
       <IntegrationsSection />
 
+      <StuckIngestionsSection />
+
       <WorkspaceSection />
 
       <DedupBackfillSection />
@@ -47,6 +50,7 @@ export default function Settings({ user, onSignOut }) {
 }
 
 function IntegrationsSection() {
+  const confirm = useConfirm();
   const [status, setStatus] = useState(() => getGoogleConnectionStatus());
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
@@ -73,8 +77,9 @@ function IntegrationsSection() {
     }
   };
 
-  const disconnect = () => {
-    if (!window.confirm('Disconnect Google Gmail + Calendar? You can reconnect anytime.')) return;
+  const disconnect = async () => {
+    const ok = await confirm({ title: 'Disconnect Google Gmail + Calendar?', description: 'You can reconnect anytime.', confirmLabel: 'Disconnect', destructive: true });
+    if (!ok) return;
     clearStoredToken();
     setStatus(getGoogleConnectionStatus());
   };
@@ -142,13 +147,165 @@ function IntegrationRow({ icon, label, desc, connected, busy, onConnect }) {
   );
 }
 
+// Surfaces ingestion failures that would otherwise be invisible. Two sources:
+//   • users/{uid}/ingestionDeadLetter — written by the Cloud Function when a
+//     Zapier POST is rejected (validation, oversize payload, write failure).
+//   • users/{uid}/interviews with dedupStatus === 'error' — client-side
+//     processInterview failures where extraction or dedup blew up.
+// For each entry we offer "Retry" (put the interview back into the pending
+// queue, or delete the dead-letter so the source system can retry) and
+// "Dismiss" (delete the record, after confirm).
+function StuckIngestionsSection() {
+  const confirm = useConfirm();
+  const { data: deadLetters, loading: dlLoading } = useCollection('ingestionDeadLetter');
+  const { data: errorInterviews, loading: ivLoading } = useCollection('interviews', {
+    filters: [['dedupStatus', '==', 'error']],
+  });
+
+  const loading = dlLoading || ivLoading;
+  const total = (deadLetters?.length || 0) + (errorInterviews?.length || 0);
+
+  const formatDate = (ts) => {
+    if (!ts) return null;
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return Number.isNaN(d.valueOf()) ? null : d.toLocaleString();
+  };
+
+  const retryInterview = async (interview) => {
+    await updateDoc('interviews', interview.id, {
+      dedupStatus: 'pending',
+      processingError: null,
+    });
+  };
+
+  const dismissInterview = async (interview) => {
+    const ok = await confirm({
+      title: 'Dismiss stuck interview?',
+      description: 'The interview document will be deleted. If the source system still has the recording, it can re-ingest it.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteDoc('interviews', interview.id);
+  };
+
+  const dismissDeadLetter = async (dl) => {
+    const ok = await confirm({
+      title: 'Dismiss dead-letter record?',
+      description: 'The failed ingestion record will be removed. Zapier will not automatically resend — fix the upstream cause first.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteDoc('ingestionDeadLetter', dl.id);
+  };
+
+  return (
+    <Section title="Stuck ingestions" subtitle="Interviews that failed to ingest or process">
+      {loading ? (
+        <div style={{ fontSize: 13, color: COLORS.textMuted }}>Loading…</div>
+      ) : total === 0 ? (
+        <div style={{ fontSize: 13, color: COLORS.textMuted }}>
+          Nothing stuck. New ingestion failures will appear here.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {errorInterviews.map((iv) => (
+            <div
+              key={`iv-${iv.id}`}
+              style={{
+                padding: 12,
+                border: `1px solid ${COLORS.border}`,
+                borderLeft: `3px solid ${COLORS.error}`,
+                borderRadius: 6,
+                background: COLORS.cardAlt,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+                <div style={{ fontWeight: 600, color: COLORS.text, fontSize: 13 }}>
+                  {iv.title || iv.sourceIngestionJobId || iv.id}
+                </div>
+                <div style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  interview · processing error
+                </div>
+              </div>
+              {iv.processingError && (
+                <div style={{ marginTop: 4, fontSize: 12, color: COLORS.textMuted, fontFamily: 'ui-monospace, monospace' }}>
+                  {iv.processingError}
+                </div>
+              )}
+              <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => retryInterview(iv)}
+                  style={{ padding: '5px 10px', fontSize: 12, background: COLORS.primary, color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={() => dismissInterview(iv)}
+                  style={{ padding: '5px 10px', fontSize: 12, background: 'none', color: COLORS.error, border: `1px solid ${COLORS.error}`, borderRadius: 4, cursor: 'pointer' }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+          {deadLetters.map((dl) => (
+            <div
+              key={`dl-${dl.id}`}
+              style={{
+                padding: 12,
+                border: `1px solid ${COLORS.border}`,
+                borderLeft: `3px solid ${COLORS.warning}`,
+                borderRadius: 6,
+                background: COLORS.cardAlt,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+                <div style={{ fontWeight: 600, color: COLORS.text, fontSize: 13 }}>
+                  {dl.title || dl.sourceIngestionJobId || dl.id}
+                </div>
+                <div style={{ fontSize: 11, color: COLORS.textMuted }}>
+                  dead-letter · {dl.reason}
+                </div>
+              </div>
+              {dl.detail && Object.keys(dl.detail).length > 0 && (
+                <div style={{ marginTop: 4, fontSize: 12, color: COLORS.textMuted, fontFamily: 'ui-monospace, monospace' }}>
+                  {Object.entries(dl.detail).map(([k, v]) => `${k}: ${v}`).join('  ·  ')}
+                </div>
+              )}
+              <div style={{ marginTop: 2, fontSize: 11, color: COLORS.textDim }}>
+                {formatDate(dl.createdAt) || 'Just now'}
+              </div>
+              <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => dismissDeadLetter(dl)}
+                  style={{ padding: '5px 10px', fontSize: 12, background: 'none', color: COLORS.error, border: `1px solid ${COLORS.error}`, borderRadius: 4, cursor: 'pointer' }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function WorkspaceSection() {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
 
   const run = async () => {
-    if (!window.confirm('Re-run workspace classification on every record? Records already stamped with a workspace keep their current value — only unstamped records get classified.')) return;
+    const ok = await confirm({
+      title: 'Re-run workspace classification on every record?',
+      description: 'Records already stamped with a workspace keep their current value — only unstamped records get classified.',
+      confirmLabel: 'Run',
+    });
+    if (!ok) return;
     setBusy(true);
     setStatus(null);
     setError(null);
@@ -181,18 +338,19 @@ function WorkspaceSection() {
 }
 
 function DedupBackfillSection() {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState(null);
 
   const run = async () => {
-    if (!window.confirm(
-      'Backfill dedup fields on every person, company, and interview?\n\n'
-      + 'This adds normalized email / name / phone fields and scaffolding for the '
-      + 'interview-ingestion dedup pipeline. Additive only — no existing data is '
-      + 'overwritten. Safe to re-run.',
-    )) return;
+    const ok = await confirm({
+      title: 'Backfill dedup fields on every person, company, and interview?',
+      description: 'This adds normalized email / name / phone fields and scaffolding for the interview-ingestion dedup pipeline. Additive only — no existing data is overwritten. Safe to re-run.',
+      confirmLabel: 'Backfill',
+    });
+    if (!ok) return;
     setBusy(true);
     setStatus(null);
     setError(null);
@@ -244,6 +402,7 @@ function DedupBackfillSection() {
 // Sprint 9 — Lists manual merges from the last 30 days with an Undo button
 // that uses the stored snapshot on each merge record to fully revert.
 function RecentMergesSection() {
+  const confirm = useConfirm();
   const { data: merges, loading } = useCollection('merges');
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState(null);
@@ -255,11 +414,12 @@ function RecentMergesSection() {
     .sort((a, b) => new Date(b.mergedAt || 0) - new Date(a.mergedAt || 0));
 
   const handleUndo = async (merge) => {
-    if (!window.confirm(
-      `Undo this merge?\n\nAll ${merge.summary?.interviews || 0} interviews and `
-      + `${merge.summary?.interactions || 0} interactions will move back to the source, `
-      + `and the source contact will be restored.`,
-    )) return;
+    const ok = await confirm({
+      title: 'Undo this merge?',
+      description: `All ${merge.summary?.interviews || 0} interviews and ${merge.summary?.interactions || 0} interactions will move back to the source, and the source contact will be restored.`,
+      confirmLabel: 'Undo',
+    });
+    if (!ok) return;
     setBusyId(merge.id);
     setError(null);
     setOkMsg(null);
@@ -569,6 +729,7 @@ function PipelinesSection() {
 }
 
 function PipelineRow({ pipeline, editing, onEdit, onClose, canDelete, pipelines }) {
+  const confirm = useConfirm();
   const [name, setName] = useState(pipeline.name);
   const [stages, setStages] = useState(pipeline.stages || []);
   const [saving, setSaving] = useState(false);
@@ -621,7 +782,8 @@ function PipelineRow({ pipeline, editing, onEdit, onClose, canDelete, pipelines 
   };
 
   const del = async () => {
-    if (!window.confirm(`Delete pipeline "${pipeline.name}"? Deals using it will be orphaned.`)) return;
+    const ok = await confirm({ title: `Delete pipeline "${pipeline.name}"?`, description: 'Deals using it will be orphaned.', confirmLabel: 'Delete', destructive: true });
+    if (!ok) return;
     await deleteDoc('pipelines', pipeline.id);
   };
 
@@ -679,8 +841,10 @@ function PipelineRow({ pipeline, editing, onEdit, onClose, canDelete, pipelines 
             <div key={s.id || idx} style={{ display: 'grid', gridTemplateColumns: '24px 1.5fr 80px auto auto', gap: 6, alignItems: 'center', padding: 6, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 5 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <button onClick={() => moveStage(idx, -1)} disabled={idx === 0}
+                  aria-label="Move stage up"
                   style={{ padding: 0, width: 20, height: 14, background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', fontSize: 11, opacity: idx === 0 ? 0.3 : 1 }}>▲</button>
                 <button onClick={() => moveStage(idx, 1)} disabled={idx === stages.length - 1}
+                  aria-label="Move stage down"
                   style={{ padding: 0, width: 20, height: 14, background: 'none', border: 'none', cursor: idx === stages.length - 1 ? 'default' : 'pointer', fontSize: 11, opacity: idx === stages.length - 1 ? 0.3 : 1 }}>▼</button>
               </div>
               <input value={s.label} onChange={(e) => updateStage(idx, { label: e.target.value })}
@@ -698,6 +862,7 @@ function PipelineRow({ pipeline, editing, onEdit, onClose, canDelete, pipelines 
                 </label>
               </div>
               <button onClick={() => removeStage(idx)}
+                aria-label="Remove stage"
                 style={{ padding: '3px 8px', background: 'none', color: COLORS.danger, border: `1px solid ${COLORS.border}`, borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
                 ✕
               </button>
@@ -770,6 +935,7 @@ function TagsSection() {
 }
 
 function TagRow({ tag }) {
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(tag.label);
 
@@ -794,7 +960,10 @@ function TagRow({ tag }) {
         <option value="person">People</option>
         <option value="company">Companies</option>
       </select>
-      <button onClick={() => { if (window.confirm(`Delete tag "${tag.label}"?`)) removeTag(tag.id); }}
+      <button onClick={async () => {
+          const ok = await confirm({ title: `Delete tag "${tag.label}"?`, confirmLabel: 'Delete', destructive: true });
+          if (ok) removeTag(tag.id);
+        }}
         style={{ padding: '4px 10px', background: 'none', border: `1px solid ${COLORS.border}`, borderRadius: 4, cursor: 'pointer', fontSize: 11, color: COLORS.danger }}>
         Delete
       </button>
@@ -808,6 +977,7 @@ function ColorPicker({ value, onChange, small }) {
   return (
     <div style={{ position: 'relative' }}>
       <button onClick={() => setOpen((v) => !v)}
+        aria-label="Pick color"
         style={{ width: size, height: size, background: value, border: `1px solid ${COLORS.border}`, borderRadius: '50%', cursor: 'pointer', padding: 0 }} />
       {open && (
         <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }}>
@@ -815,6 +985,7 @@ function ColorPicker({ value, onChange, small }) {
             style={{ position: 'absolute', top: size + 6, left: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: 8, display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 4, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
             {TAG_COLORS.map((c) => (
               <button key={c} onClick={() => { onChange(c); setOpen(false); }}
+                aria-label={`Select color ${c}`}
                 style={{ width: 22, height: 22, background: c, border: value === c ? `2px solid ${COLORS.text}` : `1px solid ${COLORS.border}`, borderRadius: '50%', cursor: 'pointer', padding: 0 }} />
             ))}
           </div>

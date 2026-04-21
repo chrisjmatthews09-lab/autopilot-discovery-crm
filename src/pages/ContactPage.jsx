@@ -28,6 +28,7 @@ import TasksCard from '../components/ui/TasksCard';
 import DealsCard from '../components/ui/DealsCard';
 import TargetsCard from '../components/ui/TargetsCard';
 import ConvertWizard from '../components/ui/ConvertWizard';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 const inputStyle = {
   width: '100%',
@@ -594,6 +595,7 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
 export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, onLinkTranscript, onEnrich, loading, workspace = 'crm' }) {
   const cfg = V2_SCHEMA[kind];
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   const editParam = searchParams.get('edit');
   const viewParam = searchParams.get('view');
@@ -691,7 +693,7 @@ export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onD
   const handleSave = async () => {
     if (saveStatus === 'saving') return;
     const missing = cfg.coreFields.filter((f) => f.required && !formData[f.key]).map((f) => f.label);
-    if (missing.length) { alert('Required: ' + missing.join(', ')); return; }
+    if (missing.length) { toast.error('Required: ' + missing.join(', ')); return; }
 
     if (!editingId) {
       const dup = kind === 'person'
@@ -730,7 +732,10 @@ export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onD
     { key: 'actions', header: '', width: '0.6fr', align: 'right', render: (r) => (
       <span onClick={(e) => e.stopPropagation()}>
         <button onClick={() => openEdit(r)} style={iconBtn}>✎</button>
-        <button onClick={() => window.confirm(`Delete ${r.name}?`) && onDelete(r.id)} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
+        <button onClick={async () => {
+          const ok = await confirm({ title: `Delete ${r.name}?`, confirmLabel: 'Delete', destructive: true });
+          if (ok) onDelete(r.id);
+        }} style={{ ...iconBtn, color: COLORS.danger }}>🗑</button>
       </span>
     )},
   ];
@@ -859,6 +864,7 @@ export function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onD
 export function ContactDetailRoute({ kind, basePath, rows, transcripts, onDelete, onEnrich, allPeople, allCompanies }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const row = rows.find((r) => r.id === id);
 
   if (!row) {
@@ -880,7 +886,8 @@ export function ContactDetailRoute({ kind, basePath, rows, transcripts, onDelete
       onClose={() => navigate(basePath)}
       onEdit={() => navigate(`${basePath}?edit=${row.id}`)}
       onDelete={async () => {
-        if (window.confirm(`Delete ${row.name}?`)) {
+        const ok = await confirm({ title: `Delete ${row.name}?`, confirmLabel: 'Delete', destructive: true });
+        if (ok) {
           await onDelete(row.id);
           navigate(basePath);
         }

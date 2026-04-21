@@ -1,12 +1,27 @@
 rules_version = '2';
 
+// Security model — every document must live under `users/{uid}/…` and every
+// access must come from the matching authenticated user. The catch-all at the
+// bottom denies anything that escapes the user-scoped match, so new root-level
+// collections require an explicit rule rather than quietly inheriting access.
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // All user data is scoped under users/{uid}/... — any collection added here
-    // (people, companies, interviews, dedupReviewQueue, etc.) is automatically
-    // read/write restricted to the authenticated owner.
+
+    // All user data is scoped under users/{uid}/... — any collection added
+    // here (people, companies, interviews, dedupReviewQueue, _system,
+    // _rateLimits, ingestionDeadLetter, etc.) is automatically read/write
+    // restricted to the authenticated owner.
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Explicit deny-all for anything outside the user-scoped tree. Without
+    // this, a future rule that opens a different match path by accident could
+    // silently grant broader access than intended. Keeping this stanza last
+    // makes the closed-by-default intent obvious.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -17,6 +17,7 @@ import { COLORS, FONT, DISPLAY, MOBILE_NAV_HEIGHT } from './config/design-tokens
 import PageSkeleton from './components/ui/PageSkeleton';
 import { LegacyRecordRedirect, LegacyPrefixRedirect } from './router/redirects';
 import PageErrorBoundary from './components/ui/PageErrorBoundary';
+import { APPS_SCRIPT_URL } from './config/appsScript';
 
 // Page-level code splitting — every route below is fetched on demand so the
 // initial bundle only carries the shell, sidebar, and shared UI primitives.
@@ -38,8 +39,6 @@ const InterviewDetailRoute = lazy(() => import('./pages/InterviewsPage').then((m
 const PipelinePage = lazy(() => import('./pages/PipelinePage'));
 const ScriptPage = lazy(() => import('./pages/ScriptPage'));
 const ThemesPage = lazy(() => import('./pages/ThemesPage'));
-
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz89C4C15E1Cxmux8bWUWw04pghxiGlqkfb2Ulr_8FMZdnIZ9vcNEakdrGo3zNLhAZV/exec';
 
 const useAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -115,7 +114,7 @@ function App() {
 }
 
 // Translates the new normalized kind to the legacy contactType the Apps Script
-// enrichContact handler expects. Drop this once Code.gs is updated.
+// enrichContact handler expects. Drop this once enrichment moves off Apps Script.
 const KIND_TO_LEGACY_CONTACT_TYPE = { person: 'practitioner', company: 'business' };
 
 function MainApp({ user, onSignOut }) {

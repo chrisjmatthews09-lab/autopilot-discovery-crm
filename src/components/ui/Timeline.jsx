@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { COLORS } from '../../config/design-tokens';
 import { useCollection } from '../../hooks/useCollection';
 import { logInteraction, kindMeta, INTERACTION_KINDS } from '../../data/interactions';
+import { useToast } from './Toast';
 
 function toMs(v) {
   if (!v) return 0;
@@ -93,6 +94,7 @@ function TimelineItem({ item }) {
 }
 
 function LogForm({ entityType, entityId, onDone }) {
+  const toast = useToast();
   const [kind, setKind] = useState('note');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -106,7 +108,7 @@ function LogForm({ entityType, entityId, onDone }) {
       onDone();
     } catch (err) {
       console.error('Failed to log interaction', err);
-      alert('Failed to save note — check console.');
+      toast.error('Failed to save note — check console.');
       setSaving(false);
     }
   };

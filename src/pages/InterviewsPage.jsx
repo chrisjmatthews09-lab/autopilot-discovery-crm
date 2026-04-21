@@ -25,6 +25,7 @@ import EmptyState from '../components/ui/EmptyState';
 import SuggestedInterviews from '../components/ui/SuggestedInterviews';
 import Timeline from '../components/ui/Timeline';
 import TasksCard from '../components/ui/TasksCard';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 
 function DedupStatusPill({ status }) {
   if (!status || status === 'resolved') return null;
@@ -47,6 +48,7 @@ function DedupStatusPill({ status }) {
 
 function DedupResolutionPanel({ interview, people, companies }) {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState(null);
   const [enriching, setEnriching] = useState(false);
@@ -144,7 +146,10 @@ function DedupResolutionPanel({ interview, people, companies }) {
           </button>
         )}
         {(status === 'resolved' || status === 'review') && (
-          <button onClick={() => { if (window.confirm('Force-reprocess this interview from scratch? Existing auto-created person/company records will not be deleted.')) handleRetry(); }} disabled={retrying}
+          <button onClick={async () => {
+              const ok = await confirm({ title: 'Force-reprocess this interview from scratch?', description: 'Existing auto-created person/company records will not be deleted.', confirmLabel: 'Reprocess' });
+              if (ok) handleRetry();
+            }} disabled={retrying}
             title="Re-run extraction + dedup against the latest logic. Use this if a record failed to create or linked incorrectly."
             style={{ marginLeft: status === 'resolved' ? 0 : 'auto', padding: '4px 10px', background: retrying ? COLORS.border : COLORS.textMuted, color: '#fff', border: 'none', borderRadius: 4, cursor: retrying ? 'default' : 'pointer', fontSize: 11, fontWeight: 700 }}>
             {retrying ? 'Reprocessing…' : '↻ Force reprocess'}
@@ -387,6 +392,7 @@ export default function InterviewsListPage({ interviews, people, companies }) {
 export function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate, onLink, onCreatePerson, onCreateCompany, onEnrich }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [tab, setTab] = useState('questions');
   const [linkPick, setLinkPick] = useState({ type: 'person', id: '' });
   const [linkBusy, setLinkBusy] = useState(false);
@@ -502,7 +508,10 @@ export function InterviewDetailRoute({ interviews, people, companies, scripts, o
                 {resolvedType === 'company' ? '🏢' : '👤'} {linkedRecord.name || '(unnamed)'}
               </button>
               {' · '}
-              <button onClick={async () => { if (window.confirm('Unlink this interview?')) { await onLink(interview.id, '', ''); } }}
+              <button onClick={async () => {
+                  const ok = await confirm({ title: 'Unlink this interview?', confirmLabel: 'Unlink', destructive: true });
+                  if (ok) { await onLink(interview.id, '', ''); }
+                }}
                 style={{ background: 'none', border: 'none', color: COLORS.textMuted, cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>
                 Unlink
               </button>

@@ -117,7 +117,7 @@ export default function Sidebar({ user, onSignOut }) {
         <img
           src="/aa-logo.png"
           alt="Autopilot Accounting"
-          style={{ width: 48, height: 48, flexShrink: 0, objectFit: 'contain' }}
+          style={{ width: 64, height: 64, flexShrink: 0, objectFit: 'contain' }}
         />
         <h1 style={{
           fontSize: 24,

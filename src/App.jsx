@@ -1038,8 +1038,8 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
           <CompanyContactsSection
             company={row}
             contacts={companyContacts}
-            interviews={allInterviews || []}
-            interactions={allInteractions || []}
+            interviews={scopedInterviews || []}
+            interactions={scopedInteractions || []}
             workspaceId={row.workspace || workspace}
           />
         )}

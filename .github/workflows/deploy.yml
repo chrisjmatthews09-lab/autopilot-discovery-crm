@@ -36,6 +36,10 @@ jobs:
         run: npm test
 
       - name: Build
+        env:
+          # Tells vite.config.js to set base to /autopilot-discovery-crm/ so
+          # GitHub Pages serves assets from the repo subpath instead of root.
+          DEPLOY_TARGET: gh-pages
         run: npm run build
 
       - name: Configure Pages

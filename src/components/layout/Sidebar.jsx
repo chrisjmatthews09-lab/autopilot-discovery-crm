@@ -120,12 +120,13 @@ export default function Sidebar({ user, onSignOut }) {
           style={{ width: 48, height: 48, flexShrink: 0, objectFit: 'contain' }}
         />
         <h1 style={{
-          fontSize: 20,
+          fontSize: 24,
           fontWeight: 700,
           margin: 0,
           letterSpacing: '-0.01em',
           fontFamily: `'PT Serif', Georgia, 'Times New Roman', serif`,
           lineHeight: 1,
+          WebkitTextStroke: '0.5px currentColor',
         }}>
           <span style={{ color: '#000000' }}>Autopilot</span>{' '}
           <span style={{ color: '#2E48AE' }}>Accounting</span>

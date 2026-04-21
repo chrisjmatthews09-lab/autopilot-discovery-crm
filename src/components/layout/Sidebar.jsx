@@ -5,6 +5,7 @@ import { useCollection } from '../../hooks/useCollection';
 import { isOverdue } from '../../data/tasks';
 import { deleteView, parseFilters, encodeFiltersToSearch, VIEW_OBJECT_ICONS, viewRoute } from '../../data/views';
 import { useWorkspace } from '../../hooks/useWorkspace';
+import { useHasHover } from '../../hooks/useHasHover';
 import { WORKSPACES } from '../../config/workspaces';
 
 // Research, Tasks, and Review queue are platform-level — identical in both
@@ -236,6 +237,7 @@ function WorkspaceToggle({ currentId, onSwitch }) {
 function PinnedViewLink({ view }) {
   const navigate = useNavigate();
   const route = viewRoute(view);
+  const hasHover = useHasHover();
   const icon = VIEW_OBJECT_ICONS[view.object_type] || '⭐';
   if (!route) return null;
 
@@ -261,7 +263,18 @@ function PinnedViewLink({ view }) {
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{view.name}</span>
       <button onClick={remove}
         title="Unpin view"
-        style={{ background: 'none', border: 'none', color: COLORS.textMuted, cursor: 'pointer', fontSize: 11, padding: '2px 4px', opacity: 0.6 }}>
+        aria-label={`Unpin ${view.name}`}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: COLORS.textMuted,
+          cursor: 'pointer',
+          fontSize: 11,
+          // Touch devices get a wider, fully-opaque hit area; pointer devices
+          // keep the original subtle hover-only treatment.
+          padding: hasHover ? '2px 4px' : '8px 10px',
+          opacity: hasHover ? 0.6 : 1,
+        }}>
         ✕
       </button>
     </div>

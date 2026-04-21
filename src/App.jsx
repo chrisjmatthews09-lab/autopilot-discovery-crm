@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -24,8 +24,12 @@ import {
   formatInterviewDate,
 } from './lib/interviewFields.js';
 import { FIRM_ROLES, personPath, companyPath, interviewPath, interviewsListPath } from './config/workspaces';
-import ReferralPartnersList from './pages/ReferralPartners';
-import ReferralPipeline from './pages/ReferralPipeline';
+// Page-level code splitting — every route below is fetched on demand so the
+// initial bundle only carries the shell, sidebar, and shared UI primitives.
+// React.lazy is paired with the <Suspense fallback={<PageSkeleton />}> wrap
+// around <Routes /> below.
+const ReferralPartnersList = lazy(() => import('./pages/ReferralPartners'));
+const ReferralPipeline = lazy(() => import('./pages/ReferralPipeline'));
 import { LIFECYCLE_STAGES, INDUSTRIES, REVENUE_BANDS, ENTITY_TYPES, US_STATES } from './config/enums';
 import LifecycleStagePill from './components/ui/LifecycleStagePill';
 import { TagChips, TagPicker, RoleChips, RolePicker } from './components/ui/TagChips';
@@ -51,20 +55,22 @@ import { parseFilters, readFilter, encodeFiltersToSearch } from './data/views';
 import { useToast } from './components/ui/Toast';
 import { logInteraction } from './data/interactions';
 import { isValidTransition } from './config/enums';
-import Tasks from './pages/Tasks';
-import DealsList from './pages/DealsList';
-import DealDetail from './pages/DealDetail';
-import TargetsList from './pages/TargetsList';
-import TargetDetail from './pages/TargetDetail';
+const Tasks = lazy(() => import('./pages/Tasks'));
+const DealsList = lazy(() => import('./pages/DealsList'));
+const DealDetail = lazy(() => import('./pages/DealDetail'));
+const TargetsList = lazy(() => import('./pages/TargetsList'));
+const TargetDetail = lazy(() => import('./pages/TargetDetail'));
 import DataTable from './components/table/DataTable';
 import FilterBar from './components/table/FilterBar';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import MobileNav from './components/layout/MobileNav';
-import DashboardPage from './pages/Dashboard';
-import SettingsPageNew from './pages/Settings';
-import ScriptsWrapper from './pages/Scripts';
-import DedupReviewQueue from './pages/DedupReviewQueue';
+import { MOBILE_NAV_HEIGHT } from './config/design-tokens';
+const DashboardPage = lazy(() => import('./pages/Dashboard'));
+const SettingsPageNew = lazy(() => import('./pages/Settings'));
+const ScriptsWrapper = lazy(() => import('./pages/Scripts'));
+const DedupReviewQueue = lazy(() => import('./pages/DedupReviewQueue'));
+import PageSkeleton from './components/ui/PageSkeleton';
 
 // ==================== CONSTANTS ====================
 const COLORS = {
@@ -892,22 +898,39 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
     return map;
   }, [companyContacts]);
 
-  const { data: allInterviews } = useCollection('interviews', { enabled: kind === 'company' });
-  const { data: allInteractions } = useCollection('interactions', { enabled: kind === 'company' });
+  // Sprint-2 perf fix — was previously two unconstrained subscriptions to the
+  // entire `interviews` and `interactions` collections every time a company
+  // detail opened. Now we use Firestore `in` queries scoped to this company +
+  // its contacts, so the query payload is bounded by the size of the related
+  // set instead of growing with the workspace.
+  //
+  // Firestore caps `in` at 30 values; we slice to stay safe. The dedup-
+  // resolution fallback path was dropped — once mergeContacts/processInterview
+  // run, refs are normalized into linkedContactId / entity_id.
+  const scopedIds = useMemo(
+    () => (kind === 'company' ? [row.id, ...companyContactIds].slice(0, 30) : []),
+    [kind, row.id, companyContactIds],
+  );
+  const { data: scopedInterviews } = useCollection('interviews', {
+    filters: scopedIds.length ? [['linkedContactId', 'in', scopedIds]] : [],
+    enabled: kind === 'company' && scopedIds.length > 0,
+  });
+  const { data: scopedInteractions } = useCollection('interactions', {
+    filters: scopedIds.length ? [['entity_id', 'in', scopedIds]] : [],
+    enabled: kind === 'company' && scopedIds.length > 0,
+  });
 
   const companyCounts = useMemo(() => {
     if (kind !== 'company') return null;
     const idSet = new Set([row.id, ...companyContactIds]);
-    const interviewCount = (allInterviews || []).reduce((n, iv) => {
-      const matchesCompany = (iv.linkedType === 'company' && iv.linkedContactId === row.id)
-        || iv.dedupResolution?.matchedBusinessId === row.id;
-      const matchesPerson = (iv.linkedType === 'person' && companyContactIds.includes(iv.linkedContactId))
-        || (iv.dedupResolution?.matchedContactId && companyContactIds.includes(iv.dedupResolution.matchedContactId));
+    const interviewCount = (scopedInterviews || []).reduce((n, iv) => {
+      const matchesCompany = iv.linkedType === 'company' && iv.linkedContactId === row.id;
+      const matchesPerson = iv.linkedType === 'person' && companyContactIds.includes(iv.linkedContactId);
       return n + (matchesCompany || matchesPerson ? 1 : 0);
     }, 0);
     let callCount = 0;
     let noteCount = 0;
-    (allInteractions || []).forEach((it) => {
+    (scopedInteractions || []).forEach((it) => {
       if (it.kind !== 'call' && it.kind !== 'note') return;
       const inScope = (it.entity_type === 'company' && it.entity_id === row.id)
         || (it.entity_type === 'person' && idSet.has(it.entity_id));
@@ -916,7 +939,7 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
       else noteCount += 1;
     });
     return { contacts: companyContacts.length, interviews: interviewCount, calls: callCount, notes: noteCount };
-  }, [kind, row.id, companyContactIds, companyContacts.length, allInterviews, allInteractions]);
+  }, [kind, row.id, companyContactIds, companyContacts.length, scopedInterviews, scopedInteractions]);
 
   return (
     <div style={{ padding: 20 }}>
@@ -2416,6 +2439,7 @@ function MainApp({ user, onSignOut }) {
   const interviewsDf = interviews.filter((iv) => wsOf(iv, 'deal_flow') === 'deal_flow');
 
   const routes = (
+    <Suspense fallback={<PageSkeleton />}>
     <Routes>
       {/* ───── Root + legacy redirects ───── */}
       <Route path="/" element={<Navigate to="/crm" replace />} />
@@ -2521,6 +2545,7 @@ function MainApp({ user, onSignOut }) {
       <Route path="/settings" element={<SettingsPageNew user={user} onSignOut={onSignOut} />} />
       <Route path="*" element={<Navigate to="/crm" replace />} />
     </Routes>
+    </Suspense>
   );
 
   if (migrating) {
@@ -2537,7 +2562,10 @@ function MainApp({ user, onSignOut }) {
 
       {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>{routes}</div>
+          {/* +8px buffer above MobileNav so the last row / CTA on every page
+              isn't flush against the nav (focus rings + box shadows on tap
+              targets extend slightly past their layout box). */}
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: MOBILE_NAV_HEIGHT + 8 }}>{routes}</div>
           <MobileNav user={user} onSignOut={onSignOut} />
         </div>
       ) : (

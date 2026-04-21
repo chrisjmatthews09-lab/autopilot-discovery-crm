@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, MouseSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { COLORS, DISPLAY } from '../config/design-tokens';
 import { useCollection } from '../hooks/useCollection';
 import { moveDealStage, daysInStage, findStage, getDefaultPipeline, updateDeal } from '../data/deals';
@@ -46,7 +46,13 @@ export default function DealsList() {
     return map;
   }, [pipelineDeals, currentPipeline]);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // MouseSensor + TouchSensor (instead of PointerSensor) so we can tune press-and-
+  // hold timing for touch separately from mouse drag. The 150ms delay on touch
+  // avoids hijacking scroll gestures on the kanban column.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+  );
 
   if (!currentPipeline) {
     return <div style={{ padding: 24, color: COLORS.textMuted }}>Loading pipelines…</div>;

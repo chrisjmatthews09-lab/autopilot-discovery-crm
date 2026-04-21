@@ -43,6 +43,11 @@ export default function DataTable({ columns, rows, onRowClick, emptyMessage = 'N
       }}
       onMouseEnter={(e) => { if (onRowClick) e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
       onMouseLeave={(e) => { if (onRowClick) e.currentTarget.style.backgroundColor = 'transparent'; }}
+      // Touch devices don't fire mouseenter; provide tap-down feedback so the
+      // row clearly responds before the click handler navigates.
+      onTouchStart={(e) => { if (onRowClick) e.currentTarget.style.backgroundColor = COLORS.primaryLight; }}
+      onTouchEnd={(e) => { if (onRowClick) e.currentTarget.style.backgroundColor = 'transparent'; }}
+      onTouchCancel={(e) => { if (onRowClick) e.currentTarget.style.backgroundColor = 'transparent'; }}
     >
       {columns.map((c) => (
         <div key={c.key} style={{ textAlign: c.align || 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

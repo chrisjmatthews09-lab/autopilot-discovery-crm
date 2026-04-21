@@ -492,7 +492,7 @@ function V2ContactPage({ kind, basePath, rows, transcripts, onUpsert, onDelete, 
               from_stage: lifecycleGate.from,
               to_stage: lifecycleGate.to,
               meta: { backward: true },
-            }).catch(() => {});
+            }).catch((err) => console.error('logInteraction (backward stage_change) failed', err));
             doSave(override);
           }}
         />
@@ -1463,7 +1463,7 @@ function InterviewDetailRoute({ interviews, people, companies, scripts, onUpdate
     if (interview.linkedType && interview.linkedContactId) return;
     if (!resolvedType || !resolvedId) return;
     if (!linkedRecord) return;
-    onUpdate(interview.id, { linkedType: resolvedType, linkedContactId: resolvedId }).catch(() => {});
+    onUpdate(interview.id, { linkedType: resolvedType, linkedContactId: resolvedId }).catch((err) => console.error('auto-link interview failed', err));
   }, [interview?.id, resolvedType, resolvedId, linkedRecord?.id]);
 
   const summaryText = getInterviewSummary(interview);
@@ -2283,6 +2283,13 @@ function MainApp({ user, onSignOut }) {
   const { call, loading: apiLoading } = useAPI();
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth < 768;
+  const toast = useToast();
+
+  // Always read the *current* workspaceId inside async handlers. Closing over
+  // the value at render time meant a user who started a form in one workspace
+  // and submitted after switching would land the record in the wrong place.
+  const workspaceIdRef = useRef(workspaceId);
+  useEffect(() => { workspaceIdRef.current = workspaceId; }, [workspaceId]);
 
   const { data: peopleRaw, loading: peopleLoading } = useCollection('people', { enabled: !migrating });
   const { data: companiesRaw, loading: companiesLoading } = useCollection('companies', { enabled: !migrating });
@@ -2320,16 +2327,23 @@ function MainApp({ user, onSignOut }) {
   const handleUpsertPerson = async (row) => {
     const { id, ...data } = row;
     const prev = id && people.find((p) => p.id === id);
-    if (prev) {
-      await updateDoc('people', id, data);
-      if (prev.lifecycle_stage !== data.lifecycle_stage && data.lifecycle_stage) {
-        logInteraction({ kind: 'stage_change', entity_type: 'person', entity_id: id, title: 'Lifecycle stage changed', from_stage: prev.lifecycle_stage || null, to_stage: data.lifecycle_stage }).catch(() => {});
+    try {
+      if (prev) {
+        await updateDoc('people', id, data);
+        if (prev.lifecycle_stage !== data.lifecycle_stage && data.lifecycle_stage) {
+          logInteraction({ kind: 'stage_change', entity_type: 'person', entity_id: id, title: 'Lifecycle stage changed', from_stage: prev.lifecycle_stage || null, to_stage: data.lifecycle_stage })
+            .catch((err) => console.error('logInteraction (person stage_change) failed', err));
+        }
+      } else {
+        const newId = id || `person-${Date.now()}`;
+        await createDoc('people', { workspace: data.workspace || workspaceIdRef.current, ...data }, newId);
       }
-    } else {
-      const newId = id || `person-${Date.now()}`;
-      await createDoc('people', { workspace: data.workspace || workspaceId, ...data }, newId);
+      return true;
+    } catch (err) {
+      console.error('handleUpsertPerson failed', err);
+      toast.error('Failed to save contact — please try again');
+      return false;
     }
-    return true;
   };
 
   const handleDeletePerson = async (id) => {
@@ -2339,16 +2353,23 @@ function MainApp({ user, onSignOut }) {
   const handleUpsertCompany = async (row) => {
     const { id, ...data } = row;
     const prev = id && companies.find((c) => c.id === id);
-    if (prev) {
-      await updateDoc('companies', id, data);
-      if (prev.lifecycle_stage !== data.lifecycle_stage && data.lifecycle_stage) {
-        logInteraction({ kind: 'stage_change', entity_type: 'company', entity_id: id, title: 'Lifecycle stage changed', from_stage: prev.lifecycle_stage || null, to_stage: data.lifecycle_stage }).catch(() => {});
+    try {
+      if (prev) {
+        await updateDoc('companies', id, data);
+        if (prev.lifecycle_stage !== data.lifecycle_stage && data.lifecycle_stage) {
+          logInteraction({ kind: 'stage_change', entity_type: 'company', entity_id: id, title: 'Lifecycle stage changed', from_stage: prev.lifecycle_stage || null, to_stage: data.lifecycle_stage })
+            .catch((err) => console.error('logInteraction (company stage_change) failed', err));
+        }
+      } else {
+        const newId = id || `company-${Date.now()}`;
+        await createDoc('companies', { workspace: data.workspace || workspaceIdRef.current, ...data }, newId);
       }
-    } else {
-      const newId = id || `company-${Date.now()}`;
-      await createDoc('companies', { workspace: data.workspace || workspaceId, ...data }, newId);
+      return true;
+    } catch (err) {
+      console.error('handleUpsertCompany failed', err);
+      toast.error('Failed to save record — please try again');
+      return false;
     }
-    return true;
   };
 
   const handleUpdateCompany = async (id, patch) => {

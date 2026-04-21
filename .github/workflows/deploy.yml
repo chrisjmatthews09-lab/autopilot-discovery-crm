@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy (GitHub Pages + Firebase Hosting)
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 # Only one deploy at a time; don't cancel in-progress runs
 concurrency:
-  group: pages
+  group: deploy
   cancel-in-progress: false
 
 permissions:
@@ -17,7 +17,7 @@ permissions:
   id-token: write
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,7 +35,23 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build
+  build-pages:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (GitHub Pages subpath)
         env:
           # Tells vite.config.js to set base to /autopilot-discovery-crm/ so
           # GitHub Pages serves assets from the repo subpath instead of root.
@@ -50,8 +66,8 @@ jobs:
         with:
           path: ./dist
 
-  deploy:
-    needs: build
+  deploy-pages:
+    needs: build-pages
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -60,3 +76,32 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-firebase:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (Firebase Hosting, root base)
+        # No DEPLOY_TARGET → vite.config.js leaves base at '/' so Firebase
+        # Hosting serves assets from the root.
+        run: npm run build
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AUTOPILOT_CRM_147F0 }}
+          projectId: autopilot-crm-147f0
+          channelId: live

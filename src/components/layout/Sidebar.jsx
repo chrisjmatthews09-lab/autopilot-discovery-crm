@@ -121,10 +121,10 @@ export default function Sidebar({ user, onSignOut }) {
         />
         <h1 style={{
           fontSize: 20,
-          fontWeight: 800,
+          fontWeight: 700,
           margin: 0,
           letterSpacing: '-0.01em',
-          fontFamily: `'Fraunces', 'Playfair Display', 'Times New Roman', Georgia, serif`,
+          fontFamily: `'PT Serif', Georgia, 'Times New Roman', serif`,
           lineHeight: 1,
         }}>
           <span style={{ color: '#000000' }}>Autopilot</span>{' '}

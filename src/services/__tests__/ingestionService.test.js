@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest';
-import { planResolution, findBestCompanyMatch, candidateFromEntity } from '../ingestionService.js';
+import { describe, it, expect, vi } from 'vitest';
+
+// ingestionService → claudeService → config/firebase, which calls getAuth()
+// at module load. CI has no Firebase env vars, so stub the module.
+vi.mock('../../config/firebase.js', () => ({
+  db: { __mock: 'db' },
+  auth: { __mock: 'auth' },
+  functions: { __mock: 'functions' },
+}));
+
+const { planResolution, findBestCompanyMatch, candidateFromEntity } =
+  await import('../ingestionService.js');
 
 const baseEntity = {
   firstName: 'John',

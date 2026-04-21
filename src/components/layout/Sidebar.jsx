@@ -113,7 +113,7 @@ export default function Sidebar({ user, onSignOut }) {
         flexShrink: 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px 6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, margin: '4px 0 16px 6px' }}>
         <img
           src="/aa-logo.png"
           alt="Autopilot Accounting"

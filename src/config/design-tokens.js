@@ -1,4 +1,7 @@
-// Warm palette — authoritative. One source of truth for colors, fonts, spacing.
+// Warm palette with indigo primary — authoritative. One source of truth for colors, fonts, spacing.
+// Primary is the Autopilot Accounting logo indigo; `success` stays green so
+// "interested/enriched/resolved" status pills keep their semantic tone even
+// though the primary is no longer green.
 //
 // The `COLORS` object includes a handful of legacy aliases (card, cardAlt,
 // blue, gold, etc.) kept so the ~200 existing `style={{ background: COLORS.card }}`
@@ -11,9 +14,9 @@ export const COLORS = {
   bg: '#F8F6F1',
   bgMuted: '#F1EEE7',
   surface: '#FFFFFF',
-  primary: '#1A5C3A',
-  primaryHover: '#144A2E',
-  primaryLight: '#E8F0EC',
+  primary: '#2C3A8C',
+  primaryHover: '#1F2A6E',
+  primaryLight: '#E8EAF5',
   accent: '#C4552D',
   accentHover: '#A3461F',
   accentLight: '#FAEDE6',

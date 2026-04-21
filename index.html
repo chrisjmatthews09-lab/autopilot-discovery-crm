@@ -2,17 +2,53 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/autopilot-discovery-crm/assets/favicon-DzhdVXo2.svg" />
+    <link rel="icon" type="image/png" href="/aa-logo.png" />
+    <link rel="apple-touch-icon" href="/aa-logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Autopilot CRM" />
     <title>Autopilot Discovery CRM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=PT+Serif:wght@700&display=swap" rel="stylesheet" />
+    <script>
+      // SPA fallback decoder (pair with public/404.html)
+      (function (l) {
+        if (l.search[1] === '/') {
+          var decoded = l.search.slice(1).split('&').map(function (s) {
+            return s.replace(/~and~/g, '&');
+          }).join('?');
+          window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
+        }
+      })(window.location);
+    </script>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { overflow: hidden; }
+      .markdown-body h1 { font-size: 22px; font-weight: 700; margin: 20px 0 10px; }
+      .markdown-body h2 { font-size: 18px; font-weight: 700; margin: 18px 0 8px; }
+      .markdown-body h3 { font-size: 15px; font-weight: 700; margin: 14px 0 6px; }
+      .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: 14px; font-weight: 700; margin: 12px 0 4px; }
+      .markdown-body p { margin: 8px 0; }
+      .markdown-body ul, .markdown-body ol { margin: 8px 0 8px 24px; }
+      .markdown-body li { margin: 4px 0; }
+      .markdown-body strong { font-weight: 700; }
+      .markdown-body em { font-style: italic; }
+      .markdown-body blockquote { border-left: 3px solid #D6D3CD; padding-left: 12px; margin: 10px 0; color: #78716C; }
+      .markdown-body code { background: #F1EFE9; padding: 1px 6px; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9em; }
+      .markdown-body pre { background: #F1EFE9; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }
+      .markdown-body pre code { background: none; padding: 0; }
+      .markdown-body table { border-collapse: collapse; margin: 10px 0; }
+      .markdown-body th, .markdown-body td { border: 1px solid #E7E5E0; padding: 6px 10px; text-align: left; }
+      .markdown-body th { background: #FDFCF9; font-weight: 600; }
+      .markdown-body a { color: #1A5C3A; text-decoration: underline; }
+      .markdown-body hr { border: none; border-top: 1px solid #E7E5E0; margin: 16px 0; }
     </style>
-    <script type="module" crossorigin src="/autopilot-discovery-crm/assets/index-Cl589CGy.js"></script>
+    <script type="module" crossorigin src="/assets/index-B4jgpo-R.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/react-vendor-DsMsLKas.js">
+    <link rel="modulepreload" crossorigin href="/assets/markdown-vendor-1JHWzs6i.js">
+    <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-BF6veOxY.js">
   </head>
   <body>
     <div id="root"></div>

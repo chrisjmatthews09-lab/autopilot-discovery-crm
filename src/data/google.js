@@ -51,17 +51,46 @@ export async function connectGoogleScopes(scopes) {
   const result = await signInWithPopup(auth, provider);
   const cred = GoogleAuthProvider.credentialFromResult(result);
   if (!cred || !cred.accessToken) throw new Error('No OAuth access token returned');
+
+  // Firebase doesn't tell us which scopes Google *actually* granted, so ask
+  // Google directly. Prevents us from storing `hasGmail: true` when the user
+  // skipped the checkbox at the consent screen.
+  const granted = await fetchGrantedScopes(cred.accessToken);
+  const missing = scopes.filter((s) => !granted.scopes.includes(s));
+  if (missing.length > 0) {
+    throw new GoogleAuthError(
+      'scope_denied',
+      `Google did not grant the requested scope(s): ${missing.join(', ')}. At the consent screen, make sure every checkbox stays ticked (Gmail read-only for email sync, Calendar read-only for event sync).`,
+    );
+  }
+
   const existing = loadStoredToken();
-  const mergedScopes = Array.from(new Set([...(existing?.scopes || []), ...scopes]));
+  const mergedScopes = Array.from(new Set([...(existing?.scopes || []), ...granted.scopes]));
+  const expiresInMs = (granted.expiresIn || 3500) * 1000;
   const token = {
     access_token: cred.accessToken,
     scopes: mergedScopes,
-    // Google access tokens expire in 3600s. No expires_in exposed by Firebase, assume 55 min window.
-    expires_at: Date.now() + 55 * 60 * 1000,
+    expires_at: Date.now() + expiresInMs,
     email: result.user?.email || null,
   };
   saveStoredToken(token);
   return token;
+}
+
+// Query Google's tokeninfo endpoint to learn which scopes the access token
+// was actually issued for (Firebase doesn't surface this on the credential).
+async function fetchGrantedScopes(accessToken) {
+  try {
+    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+    if (!res.ok) return { scopes: [], expiresIn: null };
+    const info = await res.json();
+    return {
+      scopes: typeof info.scope === 'string' ? info.scope.split(/\s+/).filter(Boolean) : [],
+      expiresIn: info.expires_in ? Number(info.expires_in) : null,
+    };
+  } catch {
+    return { scopes: [], expiresIn: null };
+  }
 }
 
 export const connectGmail = () => connectGoogleScopes([GMAIL_SCOPE]);
@@ -79,12 +108,33 @@ async function googleFetch(url, options = {}) {
       Authorization: `Bearer ${t.access_token}`,
     },
   });
-  if (res.status === 401 || res.status === 403) {
-    throw new GoogleAuthError('auth', `Google API auth failed (${res.status}). Reconnect in Settings → Integrations.`);
-  }
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Google API error ${res.status}: ${text || res.statusText}`);
+    let parsed = null;
+    let body = '';
+    try {
+      body = await res.text();
+      parsed = body ? JSON.parse(body) : null;
+    } catch {}
+    const googleMsg = parsed?.error?.message || body || res.statusText;
+    const googleStatus = parsed?.error?.status || '';
+    if (res.status === 401) {
+      throw new GoogleAuthError('expired', `Google token expired or revoked. Reconnect in Settings → Integrations. (${googleMsg})`);
+    }
+    if (res.status === 403) {
+      const lowered = `${googleMsg} ${googleStatus}`.toLowerCase();
+      let hint;
+      if (lowered.includes('has not been used') || lowered.includes('is disabled')) {
+        hint = 'Gmail API is not enabled on the Firebase project\'s GCP console. Enable it once at console.cloud.google.com → APIs & Services → Library → Gmail API.';
+      } else if (lowered.includes('insufficient authentication scopes') || lowered.includes('insufficient_scope')) {
+        hint = 'Gmail scope was not granted at the consent screen. Reconnect and make sure the Gmail read-only checkbox stays ticked.';
+      } else if (lowered.includes('access_denied') || lowered.includes('has not completed') || lowered.includes('test')) {
+        hint = 'OAuth consent screen is in Testing mode or your account isn\'t on the test-user list. Add your email under GCP → OAuth consent screen → Test users, or publish the app.';
+      } else {
+        hint = 'Gmail API returned 403. Check the Firebase project\'s GCP console (API enablement, OAuth consent screen, test users).';
+      }
+      throw new GoogleAuthError('forbidden', `${hint} (Google: ${googleMsg})`);
+    }
+    throw new Error(`Google API error ${res.status}: ${googleMsg}`);
   }
   return res.json();
 }

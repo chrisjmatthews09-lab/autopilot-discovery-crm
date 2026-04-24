@@ -3,6 +3,13 @@
 // + person data from the interview so we can merge it into the CRM record.
 // Two variants: one for business_owner interviews, one for practitioners.
 
+import {
+  INDUSTRIES,
+  VERTICALS_BY_INDUSTRY,
+  canonicalIndustry,
+  filterVerticalsForIndustry,
+} from '../config/industryTaxonomy.js';
+
 /**
  * @typedef {object} EnrichmentContact
  * @property {string|null} firstName
@@ -51,6 +58,12 @@ export function buildEnrichmentPrompt({
     ? PRACTITIONER_SCHEMA
     : BUSINESS_OWNER_SCHEMA;
 
+  // For business_owner interviews we inject the Industry/Vertical taxonomy so
+  // Claude picks values from the approved picklist (never free-typed).
+  const taxonomyBlock = business.type === 'business_owner'
+    ? renderTaxonomyBlock()
+    : '';
+
   const contactBlock = contact
     ? `Name: ${[contact.firstName, contact.lastName].filter(Boolean).join(' ') || '(unknown)'}${contact.role ? ` · ${contact.role}` : ''}${contact.email ? ` · ${contact.email}` : ''}`
     : '(no contact context provided)';
@@ -97,7 +110,7 @@ Rules:
 - Report an \`overallConfidence\` (0-100) reflecting how good this transcript was for enrichment overall.
 - All monetary values: include the currency symbol and period. Example: "$3M/yr", "$400K ARR", "$180/month".
 - All counts (employees, clients, years) as integers.
-
+${taxonomyBlock}
 Return ONLY valid JSON matching this exact schema — no prose, no markdown fences, no comments:
 
 ${schemaBlock}
@@ -105,10 +118,31 @@ ${schemaBlock}
 Return ONLY the JSON object.`;
 }
 
+// Serialize the Industry/Vertical taxonomy into the prompt. Claude must pick
+// `industry` from this fixed list and any `vertical` values from the children
+// of the chosen industry — no free-typing.
+function renderTaxonomyBlock() {
+  const lines = ['', '- INDUSTRY + VERTICAL (picklist — MUST pick from this taxonomy only):'];
+  lines.push('    Industries (pick exactly one, copy the string verbatim):');
+  for (const ind of INDUSTRIES) lines.push(`      - ${ind}`);
+  lines.push('    Verticals by industry (pick zero or more from ONLY the chosen industry\'s list, copy strings verbatim):');
+  for (const ind of INDUSTRIES) {
+    lines.push(`      ${ind}:`);
+    for (const v of VERTICALS_BY_INDUSTRY[ind]) lines.push(`        - ${v}`);
+  }
+  lines.push('    Rules:');
+  lines.push('      - \`industry\` is REQUIRED for business_owner interviews. Never return null — make your best guess from the list above based on the transcript. Lean on explicit mentions first, fall back to inferred context (products sold, services delivered, clientele).');
+  lines.push('      - \`vertical\` is an ARRAY of zero or more verticals drawn ONLY from the chosen industry\'s list. Pick multiple when the business clearly operates across more than one vertical (e.g. a dealership selling both new and used cars → both "New Car Dealers" AND "Used Car Dealers").');
+  lines.push('      - If the transcript gives no signal to narrow down a vertical, return \`[]\` and leave industry filled.');
+  lines.push('      - Do NOT invent industry or vertical names. If a candidate looks close but isn\'t on the list, pick the best match that IS on the list.');
+  return lines.join('\n') + '\n';
+}
+
 const BUSINESS_OWNER_SCHEMA = `{
   "summary": string | null,
   "industry": string | null,
   "industryConfidence": number,
+  "vertical": string[],
   "location": string | null,
   "email": string | null,
   "phone": string | null,
@@ -167,6 +201,7 @@ const PRACTITIONER_SCHEMA = `{
 export const BUSINESS_OWNER_FIELDS = Object.freeze([
   'summary',
   'industry', 'industryConfidence',
+  'vertical',
   'location',
   'email', 'phone',
   'revenue', 'revenueConfidence',
@@ -238,4 +273,28 @@ export const ARRAY_FIELDS = Object.freeze([
   'specialties',
   'serviceLines',
   'softwareStack',
+  'vertical',
 ]);
+
+/**
+ * Coerce a business_owner enrichment payload to valid taxonomy values.
+ *
+ * Claude is instructed to pick industry/vertical from the hard-coded taxonomy,
+ * but we validate rather than trust — any industry that doesn't match a
+ * canonical name is dropped (defensive, though the prompt should prevent this)
+ * and verticals are filtered to only those that belong to the canonical
+ * industry. The returned object is a shallow copy; the original is not mutated.
+ *
+ * @param {object} enriched
+ * @returns {object}
+ */
+export function normalizeBusinessOwnerEnrichment(enriched) {
+  if (!enriched || typeof enriched !== 'object') return enriched;
+  const out = { ...enriched };
+  const canonInd = canonicalIndustry(out.industry);
+  out.industry = canonInd; // null if Claude gave something off-list; UI/prompt will surface it on next run
+  out.vertical = canonInd && Array.isArray(out.vertical)
+    ? filterVerticalsForIndustry(canonInd, out.vertical)
+    : [];
+  return out;
+}

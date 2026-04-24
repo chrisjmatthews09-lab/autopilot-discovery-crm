@@ -29,6 +29,7 @@ import {
   BUSINESS_OWNER_FIELDS,
   PRACTITIONER_PERSON_FIELDS,
   PRACTITIONER_COMPANY_FIELDS,
+  normalizeBusinessOwnerEnrichment,
 } from '../prompts/enrichment.js';
 import { listDocs, batchWrite, updateDoc, getDoc } from '../data/firestore.js';
 import { db, auth } from '../config/firebase.js';
@@ -802,6 +803,11 @@ export async function enrichAndMergeInterview(interview, options = {}) {
       enrichmentRanAt: serverTimestamp(),
     });
     return { error: msg };
+  }
+
+  // Guarantee industry/vertical are taxonomy-valid before they hit the record.
+  if (businessType === 'business_owner') {
+    enriched = normalizeBusinessOwnerEnrichment(enriched);
   }
 
   const personMerge = mergeEnrichment(

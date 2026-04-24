@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { LIFECYCLE_STAGES, INDUSTRIES, REVENUE_BANDS, ENTITY_TYPES, US_STATES, isValidTransition } from '../config/enums';
+import { LIFECYCLE_STAGES, REVENUE_BANDS, ENTITY_TYPES, US_STATES, isValidTransition } from '../config/enums';
+import { INDUSTRIES, VERTICALS_BY_INDUSTRY, filterVerticalsForIndustry } from '../config/industryTaxonomy';
 import { COLORS, DISPLAY } from '../config/design-tokens';
 import { historyForField } from '../lib/dedup/enrichmentMerge.js';
 import { useCollection } from '../hooks/useCollection';
@@ -80,8 +81,8 @@ export const V2_SCHEMA = {
       { key: 'location', label: 'Location (City, State)' },
     ],
     firmFields: [
-      { key: 'industry', label: 'Industry', type: 'select', options: INDUSTRIES },
-      { key: 'sub_vertical', label: 'Sub-vertical' },
+      { key: 'industry', label: 'Industry', type: 'select', options: ['', ...INDUSTRIES] },
+      { key: 'vertical', label: 'Vertical', type: 'multiselect-vertical' },
       { key: 'revenue_band', label: 'Revenue band', type: 'select', options: REVENUE_BANDS },
       { key: 'revenue', label: 'Revenue (specific)' },
       { key: 'employee_count', label: 'Employees' },
@@ -112,7 +113,7 @@ export function schemaFor(kind, workspace = 'crm') {
       singular: 'Firm',
       orgLabel: 'Firm Name',
       coreFields: base.coreFields.map((f) => f.key === 'name' ? { ...f, label: 'Firm Name' } : f),
-      firmFields: base.firmFields.filter((f) => f.key !== 'industry'),
+      firmFields: base.firmFields.filter((f) => f.key !== 'industry' && f.key !== 'vertical'),
     };
   }
   return base;
@@ -132,6 +133,58 @@ function StatusPill({ status }) {
   return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, backgroundColor: c.bg, color: c.fg, textTransform: 'capitalize' }}>{s}</span>;
 }
 
+function VerticalMultiSelect({ industry, value, onChange }) {
+  const [search, setSearch] = useState('');
+  const options = industry && VERTICALS_BY_INDUSTRY[industry] ? VERTICALS_BY_INDUSTRY[industry] : [];
+  const selected = new Set(value || []);
+  const visible = search.trim()
+    ? options.filter((o) => o.toLowerCase().includes(search.trim().toLowerCase()))
+    : options;
+
+  if (!industry) {
+    return <div style={{ padding: 10, color: COLORS.textDim, fontSize: 12, fontStyle: 'italic', border: `1px dashed ${COLORS.border}`, borderRadius: 4 }}>Pick an industry first.</div>;
+  }
+
+  const toggle = (v) => {
+    const next = new Set(selected);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    onChange(options.filter((o) => next.has(o)));
+  };
+
+  return (
+    <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 4, background: COLORS.card }}>
+      {value && value.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: 6, borderBottom: `1px solid ${COLORS.border}` }}>
+          {value.map((v) => (
+            <span key={v} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', background: COLORS.cardAlt, border: `1px solid ${COLORS.border}`, borderRadius: 12, fontSize: 11, color: COLORS.text }}>
+              {v}
+              <button type="button" onClick={() => toggle(v)} aria-label={`Remove ${v}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textMuted, fontSize: 12, lineHeight: 1 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder={`Search verticals (${options.length})…`}
+        style={{ width: '100%', padding: 8, border: 'none', borderBottom: `1px solid ${COLORS.border}`, fontSize: 12, background: 'transparent', color: COLORS.text, boxSizing: 'border-box', outline: 'none' }}
+      />
+      <div style={{ maxHeight: 200, overflowY: 'auto', padding: 4 }}>
+        {visible.length === 0 ? (
+          <div style={{ padding: 8, fontSize: 12, color: COLORS.textDim, fontStyle: 'italic' }}>No matches.</div>
+        ) : visible.map((o) => (
+          <label key={o} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', fontSize: 12, color: COLORS.text, cursor: 'pointer', borderRadius: 3, background: selected.has(o) ? COLORS.cardAlt : 'transparent' }}>
+            <input type="checkbox" checked={selected.has(o)} onChange={() => toggle(o)} />
+            {o}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEditing, tags = [], kind, workspace = 'crm' }) {
   const isSaving = saveStatus === 'saving';
   const isSuccess = saveStatus === 'success';
@@ -149,9 +202,25 @@ function V2Form({ cfg, formData, setFormData, onSave, onCancel, saveStatus, isEd
               {f.label}{f.required && <span style={{ color: COLORS.danger }}> *</span>}
             </label>
             {f.type === 'select' ? (
-              <select value={formData[f.key] || ''} onChange={(e) => updateField(f.key, e.target.value)} style={inputStyle}>
+              <select value={formData[f.key] || ''} onChange={(e) => {
+                const next = e.target.value;
+                setFormData((p) => {
+                  const updated = { ...p, [f.key]: next };
+                  // Industry change must prune any verticals that no longer belong.
+                  if (f.key === 'industry') {
+                    updated.vertical = filterVerticalsForIndustry(next, Array.isArray(p.vertical) ? p.vertical : []);
+                  }
+                  return updated;
+                });
+              }} style={inputStyle}>
                 {f.options.map((o) => <option key={o} value={o}>{o || '—'}</option>)}
               </select>
+            ) : f.type === 'multiselect-vertical' ? (
+              <VerticalMultiSelect
+                industry={formData.industry || ''}
+                value={Array.isArray(formData[f.key]) ? formData[f.key] : []}
+                onChange={(next) => updateField(f.key, next)}
+              />
             ) : (
               <input type={f.type || 'text'} value={formData[f.key] || ''} onChange={(e) => updateField(f.key, e.target.value)} style={inputStyle} />
             )}
@@ -506,6 +575,14 @@ function ContactDetail({ row, kind, onClose, onEdit, onDelete, allPeople = [], a
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: workspace === 'deal_flow' ? 24 : 14 }}>
               {workspace !== 'deal_flow' && (
                 <Tile label="Industry" value={row.industry} history={row.enrichmentHistory} fieldName="industry" />
+              )}
+              {workspace !== 'deal_flow' && (
+                <div style={{ padding: 14, backgroundColor: COLORS.cardAlt, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
+                  <div style={{ fontSize: 10, color: COLORS.textDim, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Vertical</div>
+                  {Array.isArray(row.vertical) && row.vertical.length > 0
+                    ? <ChipList items={row.vertical} color={COLORS.accent} />
+                    : <div style={{ fontSize: 13, color: COLORS.textDim }}>—</div>}
+                </div>
               )}
               <Tile label="Revenue" value={row.revenue_band || row.revenue} history={row.enrichmentHistory} fieldName="revenue" />
               <Tile label="Employees" value={row.employee_count || row.employees} history={row.enrichmentHistory} fieldName="employees" />
